@@ -1,0 +1,89 @@
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import Optional, List
+import os
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    # App
+    APP_NAME: str = "Rafaela – AI Secretary"
+    APP_VERSION: str = "0.1.0-trial"
+    ENVIRONMENT: str = "development"  # development | trial | production
+    DEBUG: bool = True
+    DRY_RUN: bool = True  # When True, write actions are simulated
+
+    # API
+    API_PREFIX: str = "/api/v1"
+    CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8000"]
+
+    # LLM
+    OPENAI_API_KEY: Optional[str] = None
+    OPENAI_BASE_URL: Optional[str] = None  # e.g. https://opencode.ai/zen/go/v1 for OpenCode Go
+    ANTHROPIC_API_KEY: Optional[str] = None
+    LLM_PROVIDER: str = "openai"  # openai | anthropic
+    LLM_MODEL: str = "gpt-4o-mini"
+
+    # Firecrawl
+    FIRECRAWL_API_KEY: Optional[str] = None
+
+    # Microsoft 365
+    MS_CLIENT_ID: Optional[str] = None
+    MS_CLIENT_SECRET: Optional[str] = None
+    MS_TENANT_ID: str = "common"
+    MS_REDIRECT_URI: str = "http://localhost:8000/api/v1/auth/microsoft/callback"
+    MS_SCOPES: List[str] = [
+        "User.Read",
+        "Mail.Read",
+        # Read-only mail by design: Mail.ReadWrite/Mail.Send intentionally omitted.
+        "Calendars.Read",
+        "Calendars.ReadWrite",
+        "Files.Read",
+        # offline_access/openid/profile are added automatically by MSAL (reserved scopes)
+    ]
+
+    # Google
+    GOOGLE_CLIENT_ID: Optional[str] = None
+    GOOGLE_CLIENT_SECRET: Optional[str] = None
+    GOOGLE_REDIRECT_URI: str = "http://localhost:8000/api/v1/auth/google/callback"
+    # Identity login (Sign in with Google) – separate from Gmail/Calendar integration
+    GOOGLE_LOGIN_REDIRECT_URI: str = "http://localhost:8000/api/v1/login/google/callback"
+    MS_LOGIN_REDIRECT_URI: str = "http://localhost:8000/api/v1/login/microsoft/callback"
+    # Frontend URL after successful login
+    FRONTEND_URL: str = "http://localhost:3000"
+    # Cookie
+    COOKIE_SECURE: bool = False  # True behind HTTPS
+    COOKIE_NAME: str = "rafaela_session"
+    GOOGLE_SCOPES: List[str] = [
+        "openid",
+        "https://www.googleapis.com/auth/userinfo.email",
+        "https://www.googleapis.com/auth/userinfo.profile",
+        "https://www.googleapis.com/auth/gmail.readonly",
+        # gmail.send / gmail.compose intentionally omitted (read-only mail).
+        "https://www.googleapis.com/auth/calendar.readonly",
+        "https://www.googleapis.com/auth/calendar.events",
+        "https://www.googleapis.com/auth/drive.readonly",
+    ]
+
+    # Database
+    DATABASE_URL: str = "postgresql+asyncpg://secretary:secretary@db:5432/secretary"
+    REDIS_URL: str = "redis://redis:6379/0"
+
+    # Security
+    SECRET_KEY: str = "change-me-in-production-please-use-a-long-random-string"
+    ENCRYPTION_KEY: Optional[str] = None  # Fernet key for token encryption
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 1 day
+
+    # GDPR
+    DEFAULT_RETENTION_DAYS: int = 30
+    AUDIT_LOG_RETENTION_DAYS: int = 365
+
+
+settings = Settings()
+
+# Note: login redirect URIs (identity) – can differ from integration redirects
+# Added as optional attributes via model - we patch Settings class

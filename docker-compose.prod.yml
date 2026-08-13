@@ -1,0 +1,148 @@
+# =============================================================================
+# Rafaela AI Secretary – Production Compose
+# Usage:
+#   cp .env.example .env.prod   # then fill strong secrets
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+# =============================================================================
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend.prod
+    container_name: secretary-backend-prod
+    restart: unless-stopped
+    env_file:
+      - .env.prod
+    environment:
+      ENVIRONMENT: production
+      DEBUG: "false"
+      # Override only if not set in .env.prod
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://secretary:${POSTGRES_PASSWORD}@db:5432/secretary}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - secretary-internal
+      - secretary-edge
+    # Bind only to localhost by default (put reverse proxy in front)
+    ports:
+      - "127.0.0.1:8000:8000"
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    mem_limit: 1g
+    cpus: 1.5
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend.prod
+      args:
+        # Browser calls API via public URL (set in .env.prod)
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://127.0.0.1:8000}
+    container_name: secretary-frontend-prod
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - secretary-edge
+    ports:
+      - "127.0.0.1:3000:3000"
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    mem_limit: 512m
+    cpus: 0.75
+
+  db:
+    image: postgres:16-alpine
+    container_name: secretary-db-prod
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-secretary}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-secretary}
+    volumes:
+      - postgres_data_prod:/var/lib/postgresql/data
+    networks:
+      - secretary-internal
+    # NOT published to host – internal only
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 1g
+    cpus: 1.0
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-secretary} -d ${POSTGRES_DB:-secretary}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    # Optional: tighten Postgres
+    command:
+      - postgres
+      - -c
+      - listen_addresses=*
+      - -c
+      - ssl=off
+
+  redis:
+    image: redis:7-alpine
+    container_name: secretary-redis-prod
+    restart: unless-stopped
+    # Set REDIS_PASSWORD in .env.prod for requirepass; default is no password (still internal-only)
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --maxmemory
+      - 128mb
+      - --maxmemory-policy
+      - allkeys-lru
+    volumes:
+      - redis_data_prod:/data
+    networks:
+      - secretary-internal
+    # NOT published to host
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    cpus: 0.5
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  postgres_data_prod:
+  redis_data_prod:
+
+networks:
+  # Backend ↔ DB ↔ Redis (no direct host exposure)
+  secretary-internal:
+    driver: bridge
+    internal: true
+  # Backend + Frontend reachable from host / reverse proxy
+  secretary-edge:
+    driver: bridge
