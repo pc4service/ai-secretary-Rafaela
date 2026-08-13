@@ -2,6 +2,8 @@
 
 import { useState, useRef, useEffect } from "react";
 import { Send, Loader2, Bot, User, Check, X } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { chat, resolveAction } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -116,9 +118,15 @@ export default function Chat() {
                     : "bg-rose-600 text-white"
                 )}
               >
-                <p className="whitespace-pre-wrap">
-                  {m.content.replace(/\[PENDING_ACTION:[a-f0-9\-]+\]\n?/g, "")}
-                </p>
+                {m.role === "assistant" ? (
+                  <div className="prose prose-sm dark:prose-invert max-w-none prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5 prose-headings:mt-4 prose-headings:mb-2 prose-pre:bg-slate-100 dark:prose-pre:bg-slate-900 prose-pre:rounded-lg prose-code:text-rose-600 dark:prose-code:text-rose-400 prose-table:text-xs prose-a:text-rose-600">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {m.content.replace(/\[PENDING_ACTION:[a-f0-9\-]+\]\n?/g, "")}
+                    </ReactMarkdown>
+                  </div>
+                ) : (
+                  <p className="whitespace-pre-wrap">{m.content}</p>
+                )}
               </div>
 
               {m.pendingActionId && !m.actionResolved && (
