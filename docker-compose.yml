@@ -8,6 +8,8 @@ services:
     container_name: secretary-backend
     ports:
       - "8000:8000"
+      # Codex OAuth callback (auth.openai.com redirects to localhost:1455)
+      - "1455:8000"
     env_file:
       - .env
     environment:

@@ -36,9 +36,12 @@ You assist the user with calendar management, email handling, task organization,
    - Never claim that an event was created until the user has approved it.
 
 3. Tool Usage
-   - Use the available tools when needed.
+   - ALWAYS use tools for live data. Never claim you lack inbox/calendar access without trying the tool first.
+   - Emails (Outlook): call ms_list_emails. Calendar (Outlook): call ms_list_calendar.
+   - Gmail/Google Calendar: google_list_emails / google_list_calendar when Google is connected.
+   - Do not pass user_id unless required; omit it or use the default.
    - Prefer the least-privilege tool and the minimal amount of data.
-   - After using a tool, summarize the result clearly for the user.
+   - After using a tool, summarize the result clearly for the user in Greek if they wrote in Greek.
 
 4. Communication Style
    - Professional, calm, efficient, warm and friendly (female voice).
@@ -109,57 +112,96 @@ def gdpr_delete_user_data(user_id: str = "current", confirm: bool = False) -> st
     )
 
 
+def _default_tools() -> List:
+    # NOTE: send-email tools are intentionally NOT registered (read-only mail).
+    # Calendar writes remain as propose-and-approve (human-in-the-loop).
+    from app.tools.ms365_tools import (
+        ms_list_emails,
+        ms_list_calendar,
+        ms_propose_create_event,
+    )
+    from app.tools.google_tools import (
+        google_list_emails,
+        google_list_calendar,
+        google_propose_create_event,
+    )
+    return [
+        get_current_datetime,
+        research_with_firecrawl,
+        gdpr_export_user_data,
+        gdpr_delete_user_data,
+        ms_list_emails,
+        ms_list_calendar,
+        ms_propose_create_event,
+        google_list_emails,
+        google_list_calendar,
+        google_propose_create_event,
+    ]
+
+
 def create_secretary_agent(
     tools: Optional[List] = None,
     streaming_callback=None,
+    chat_generator=None,
 ) -> Agent:
+    """Build Rafaela agent. Prefer run_agent() so LLM failover is applied."""
     if tools is None:
-        # NOTE: send-email tools are intentionally NOT registered (read-only mail).
-        # Calendar writes remain as propose-and-approve (human-in-the-loop).
-        from app.tools.ms365_tools import (
-            ms_list_emails,
-            ms_list_calendar,
-            ms_propose_create_event,
-        )
-        from app.tools.google_tools import (
-            google_list_emails,
-            google_list_calendar,
-            google_propose_create_event,
-        )
+        tools = _default_tools()
 
-        tools = [
-            get_current_datetime,
-            research_with_firecrawl,
-            gdpr_export_user_data,
-            gdpr_delete_user_data,
-            ms_list_emails,
-            ms_list_calendar,
-            ms_propose_create_event,
-            google_list_emails,
-            google_list_calendar,
-            google_propose_create_event,
-        ]
+    if chat_generator is None:
+        from app.services.llm_router import list_llm_endpoints, build_chat_generator
 
-    if not settings.OPENAI_API_KEY and settings.LLM_PROVIDER == "openai":
-        raise ValueError("OPENAI_API_KEY is required when LLM_PROVIDER=openai")
+        endpoints = list_llm_endpoints()
+        if not endpoints:
+            raise ValueError(
+                "Δεν έχει ρυθμιστεί LLM. Βάλε OPENAI_API_KEY (επίσημο OpenAI) "
+                "στο .env. Το OpenCode key πάει στο OPENCODE_API_KEY."
+            )
+        chat_generator = build_chat_generator(endpoints[0])
 
-    chat_generator = OpenAIChatGenerator(
-        api_key=Secret.from_token(settings.OPENAI_API_KEY) if settings.OPENAI_API_KEY else Secret.from_env_var("OPENAI_API_KEY"),
-        model=settings.LLM_MODEL,
-        api_base_url=settings.OPENAI_BASE_URL,
-    )
-
-    agent = Agent(
+    return Agent(
         chat_generator=chat_generator,
         tools=tools,
         system_prompt=SECRETARY_SYSTEM_PROMPT,
         streaming_callback=streaming_callback,
     )
-    return agent
 
 
-async def run_agent(messages: List[ChatMessage], agent: Optional[Agent] = None) -> Dict[str, Any]:
-    if agent is None:
-        agent = create_secretary_agent()
-    result = agent.run(messages=messages)
+async def run_agent(
+    messages: List[ChatMessage],
+    agent: Optional[Agent] = None,
+    streaming_callback=None,
+    user_id: str = "demo-user",
+) -> Dict[str, Any]:
+    """Run the agent with multi-provider LLM failover (credits / 429 / 5xx)."""
+    if agent is not None:
+        return agent.run(messages=messages)
+
+    from app.services.llm_router import run_with_llm_failover
+    from app.services.token_store import get_fresh_openai_tokens, ReconnectRequired
+
+    tools = _default_tools()
+    oauth_token = None
+    try:
+        oauth_token = (await get_fresh_openai_tokens(user_id)).get("access_token")
+    except ReconnectRequired:
+        oauth_token = None
+    except Exception:
+        oauth_token = None
+
+    def _once(_endpoint, generator: OpenAIChatGenerator):
+        ag = create_secretary_agent(
+            tools=tools,
+            streaming_callback=streaming_callback,
+            chat_generator=generator,
+        )
+        return ag.run(messages=messages)
+
+    result, endpoint = run_with_llm_failover(
+        _once, operation="run_agent", access_token=oauth_token
+    )
+    logger.info("agent_completed", llm=endpoint.name, model=endpoint.model)
+    # Attach which provider served the reply (for UI/debug; harmless extra key)
+    if isinstance(result, dict):
+        result = {**result, "_llm_provider": endpoint.name, "_llm_model": endpoint.model}
     return result

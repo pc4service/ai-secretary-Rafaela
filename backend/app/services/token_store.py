@@ -124,6 +124,55 @@ def _scopes_from_jwt(access_token: str) -> list[str]:
         return []
 
 
+async def get_fresh_openai_tokens(user_id: str) -> Dict[str, Any]:
+    """Valid ChatGPT OAuth access token, refreshing when expired."""
+    from app.services.openai_oauth import refresh_access_token
+
+    skew = timedelta(minutes=5)
+    now = datetime.now(timezone.utc)
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(OAuthToken).where(
+                OAuthToken.user_id == user_id,
+                OAuthToken.provider == "openai",
+            )
+        )
+        row = result.scalar_one_or_none()
+        if not row:
+            raise ReconnectRequired("OpenAI / ChatGPT is not connected")
+        try:
+            data = json.loads(decrypt_token(row.encrypted_data))
+        except Exception as e:
+            raise ReconnectRequired(f"OpenAI token unreadable: {e}") from e
+
+        if row.expires_at and row.expires_at - skew > now and data.get("access_token"):
+            return data
+
+        refresh = data.get("refresh_token")
+        if not refresh:
+            await session.delete(row)
+            await session.commit()
+            raise ReconnectRequired("OpenAI session expired — connect ChatGPT again")
+
+        try:
+            fresh = await refresh_access_token(refresh)
+        except Exception as e:
+            await session.delete(row)
+            await session.commit()
+            raise ReconnectRequired("OpenAI refresh failed — connect ChatGPT again") from e
+
+        data["access_token"] = fresh["access_token"]
+        if fresh.get("refresh_token"):
+            data["refresh_token"] = fresh["refresh_token"]
+        row.encrypted_data = encrypt_token(json.dumps(data))
+        if fresh.get("expires_in"):
+            row.expires_at = datetime.now(timezone.utc) + timedelta(seconds=int(fresh["expires_in"]))
+        row.updated_at = datetime.now(timezone.utc)
+        await session.commit()
+        return data
+
+
 async def get_fresh_microsoft_tokens(user_id: str) -> Dict[str, Any]:
     """Return Microsoft tokens with a valid access token — no OAuth login needed
     after the first connect.

@@ -9,17 +9,24 @@ from time import time
 from msal import SerializableTokenCache
 from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse, JSONResponse
+from fastapi.responses import RedirectResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from haystack.dataclasses import ChatMessage
 import structlog
 import re
+import asyncio
+import json
 
 from app.core.config import settings
 from app.agent.secretary_agent import create_secretary_agent, run_agent, SECRETARY_SYSTEM_PROMPT
 from app.models.database import init_db
-from app.services.token_store import save_oauth_token, delete_oauth_token, is_connected, get_token_info
+from app.services.token_store import (
+    save_oauth_token,
+    delete_oauth_token,
+    is_connected,
+    get_token_info,
+)
 from app.services.pending_actions import resolve_action, list_pending_for_user, get_pending_action
 from app.services.microsoft import Microsoft365Service
 from app.services.google import GoogleWorkspaceService
@@ -31,6 +38,7 @@ from app.services.conversation import (
     delete_conversation,
     log_audit,
 )
+from app.services.llm_router import llm_status_public
 
 logger = structlog.get_logger()
 
@@ -212,8 +220,8 @@ async def chat(request: ChatRequest, raw: Request, user: dict | None = Depends(g
         messages.append(ChatMessage.from_user(request.message))
         await add_message(conversation_id, "user", request.message)
 
-        agent = create_secretary_agent()
-        result = await run_agent(messages, agent=agent)
+        # run_agent applies multi-provider LLM failover (credits / 429 / 5xx)
+        result = await run_agent(messages, user_id=effective_user)
 
         last_message = result.get("last_message")
         reply_text = last_message.text if last_message else "Sorry, I could not generate a reply."
@@ -224,7 +232,15 @@ async def chat(request: ChatRequest, raw: Request, user: dict | None = Depends(g
             pending_id = match.group(1)
 
         await add_message(conversation_id, "assistant", reply_text, pending_action_id=pending_id)
-        await log_audit(effective_user, "chat", {"conversation_id": conversation_id})
+        await log_audit(
+            effective_user,
+            "chat",
+            {
+                "conversation_id": conversation_id,
+                "llm_provider": result.get("_llm_provider"),
+                "llm_model": result.get("_llm_model"),
+            },
+        )
 
         return ChatResponse(
             reply=reply_text,
@@ -236,6 +252,100 @@ async def chat(request: ChatRequest, raw: Request, user: dict | None = Depends(g
     except Exception as e:
         logger.exception("Chat error")
         raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
+
+
+@app.post(f"{settings.API_PREFIX}/chat/stream")
+async def chat_stream(request: ChatRequest, user: dict | None = Depends(get_current_user)):
+    """SSE streaming chat – events: status | delta | done | error (JSON lines after data: )."""
+
+    async def event_gen():
+        def sse(obj: dict) -> str:
+            return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
+
+        try:
+            effective_user = (user or {}).get("user_id") or request.user_id or "demo-user"
+            yield sse({"type": "status", "message": "Σύνδεση με τη Rafaela…"})
+            conv = await get_or_create_conversation(effective_user, request.conversation_id)
+            conversation_id = conv.id
+
+            messages: List[ChatMessage] = []
+            if request.history:
+                for h in request.history:
+                    role, content = h.get("role", "user"), h.get("content", "")
+                    if role == "user":
+                        messages.append(ChatMessage.from_user(content))
+                    elif role == "assistant":
+                        messages.append(ChatMessage.from_assistant(content))
+            else:
+                db_msgs = await get_conversation_messages(conversation_id, limit=30)
+                for m in db_msgs:
+                    if m["role"] == "user":
+                        messages.append(ChatMessage.from_user(m["content"]))
+                    elif m["role"] == "assistant":
+                        messages.append(ChatMessage.from_assistant(m["content"]))
+
+            messages.append(ChatMessage.from_user(request.message))
+            await add_message(conversation_id, "user", request.message)
+
+            yield sse({"type": "status", "message": "Σκέφτομαι και ελέγχω εργαλεία…"})
+
+            # Failover-aware agent run off the event loop (run_agent is async)
+            def _run():
+                return asyncio.run(run_agent(messages, user_id=effective_user))
+
+            result = await asyncio.to_thread(_run)
+
+            last_message = result.get("last_message")
+            reply_text = last_message.text if last_message else "Sorry, I could not generate a reply."
+            llm_name = result.get("_llm_provider")
+            if llm_name:
+                yield sse({"type": "status", "message": f"Απάντηση μέσω {llm_name}…"})
+
+            pending_id = None
+            match = re.search(r"\[PENDING_ACTION:([a-f0-9\-]+)\]", reply_text)
+            if match:
+                pending_id = match.group(1)
+
+            # Stream reply in small chunks for progressive UI
+            chunk_size = 24
+            for i in range(0, len(reply_text), chunk_size):
+                yield sse({"type": "delta", "text": reply_text[i : i + chunk_size]})
+                await asyncio.sleep(0.015)
+
+            await add_message(conversation_id, "assistant", reply_text, pending_action_id=pending_id)
+            await log_audit(
+                effective_user,
+                "chat_stream",
+                {
+                    "conversation_id": conversation_id,
+                    "llm_provider": result.get("_llm_provider"),
+                    "llm_model": result.get("_llm_model"),
+                },
+            )
+
+            yield sse({
+                "type": "done",
+                "reply": reply_text,
+                "pending_action_id": pending_id,
+                "conversation_id": conversation_id,
+                "llm_provider": result.get("_llm_provider"),
+                "llm_model": result.get("_llm_model"),
+            })
+        except ValueError as e:
+            yield sse({"type": "error", "message": str(e)})
+        except Exception as e:
+            logger.exception("Chat stream error")
+            yield sse({"type": "error", "message": f"Internal error: {str(e)}"})
+
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.get(f"{settings.API_PREFIX}/system-prompt")
@@ -279,9 +389,25 @@ async def get_settings_info(user: dict | None = Depends(get_current_user), user_
     ms_connected = await is_connected(uid, "microsoft")
     ms_info = await get_token_info(uid, "microsoft") if ms_connected else None
     granted = set((ms_info or {}).get("scopes") or [])
+    openai_connected = await is_connected(uid, "openai")
+    llm_status = llm_status_public(openai_oauth_connected=openai_connected)
+    # Effective LLM for UI: ChatGPT OAuth (gpt-5.5) wins over empty OPENAI_API_KEY.
+    if openai_connected:
+        effective_provider = "openai-oauth"
+        effective_model = settings.OPENAI_OAUTH_MODEL or "gpt-5.5"
+        llm_ready = True
+    else:
+        effective_provider = settings.LLM_PROVIDER
+        effective_model = settings.LLM_MODEL
+        llm_ready = (
+            _key_present(settings.OPENAI_API_KEY)
+            if settings.LLM_PROVIDER == "openai"
+            else _key_present(settings.ANTHROPIC_API_KEY)
+        ) or (llm_status.get("endpoint_count") or 0) > 0
     return {
         "microsoft_connected": ms_connected,
         "google_connected": await is_connected(uid, "google"),
+        "openai_connected": openai_connected,
         "dry_run": settings.DRY_RUN,
         "retention_days": settings.DEFAULT_RETENTION_DAYS,
         "environment": settings.ENVIRONMENT,
@@ -290,9 +416,11 @@ async def get_settings_info(user: dict | None = Depends(get_current_user), user_
         # Feature flags: which credentials are configured server-side.
         # Booleans only — secret values are never exposed to the frontend.
         "config": {
-            "llm": _key_present(settings.OPENAI_API_KEY) if settings.LLM_PROVIDER == "openai" else _key_present(settings.ANTHROPIC_API_KEY),
-            "llm_provider": settings.LLM_PROVIDER,
-            "llm_model": settings.LLM_MODEL,
+            "llm": llm_ready,
+            "llm_provider": effective_provider,
+            "llm_model": effective_model,
+            "openai_oauth_model": settings.OPENAI_OAUTH_MODEL or "gpt-5.5",
+            "llm_failover": llm_status,
             "microsoft_oauth": bool(settings.MS_CLIENT_ID and settings.MS_CLIENT_SECRET),
             # Granted vs required scopes (least-privilege drift detection)
             "microsoft_scopes": sorted(granted) if granted else None,
@@ -300,6 +428,7 @@ async def get_settings_info(user: dict | None = Depends(get_current_user), user_
             "microsoft_scopes_extra": sorted(granted - set(settings.MS_SCOPES) - {"openid", "profile", "offline_access"}) if granted else None,
             "microsoft_token_expires_at": (ms_info or {}).get("expires_at"),
             "google_oauth": bool(settings.GOOGLE_CLIENT_ID and settings.GOOGLE_CLIENT_SECRET),
+            "openai_oauth": True,
             "firecrawl": _key_present(settings.FIRECRAWL_API_KEY),
         },
     }
@@ -371,6 +500,91 @@ async def google_disconnect(user_id: str = "demo-user"):
     await delete_oauth_token(user_id, "google")
     await log_audit(user_id, "oauth_disconnect", {"provider": "google"})
     return {"status": "disconnected", "provider": "google"}
+
+
+# ---------- OpenAI / ChatGPT OAuth ----------
+
+@app.get(f"{settings.API_PREFIX}/auth/openai/login")
+async def openai_login(user: dict | None = Depends(get_current_user), user_id: str = "demo-user"):
+    from app.services.openai_oauth import create_login_url
+
+    uid = (user or {}).get("user_id") or user_id or "demo-user"
+    return {"auth_url": create_login_url(uid)}
+
+
+async def _openai_oauth_callback(code: str, state: str):
+    from app.services.openai_oauth import pop_pending, exchange_code
+
+    pending = pop_pending(state)
+    if not pending:
+        raise ValueError("Invalid or expired OpenAI OAuth state")
+    tokens = await exchange_code(code, pending["verifier"])
+    uid = pending.get("user_id") or "demo-user"
+    await save_oauth_token(
+        user_id=uid,
+        provider="openai",
+        token_data={
+            "access_token": tokens["access_token"],
+            "refresh_token": tokens.get("refresh_token"),
+            "id_token": tokens.get("id_token"),
+        },
+        expires_in=tokens.get("expires_in"),
+        scopes=tokens.get("scope") or "openid profile email offline_access",
+    )
+    await log_audit(uid, "oauth_connect", {"provider": "openai"})
+    return RedirectResponse(url=f"{settings.FRONTEND_URL}/?tab=settings&openai=connected")
+
+
+@app.get("/auth/callback")
+async def openai_codex_callback(code: str = "", state: str = "", error: str = ""):
+    """Codex public client redirects here (http://localhost:1455/auth/callback)."""
+    if error:
+        return RedirectResponse(url=f"{settings.FRONTEND_URL}/?tab=settings&openai=error")
+    try:
+        return await _openai_oauth_callback(code, state)
+    except Exception as e:
+        logger.exception("openai_oauth_callback_failed")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get(f"{settings.API_PREFIX}/auth/openai/callback")
+async def openai_app_callback(code: str = "", state: str = "", error: str = ""):
+    if error:
+        return RedirectResponse(url=f"{settings.FRONTEND_URL}/?tab=settings&openai=error")
+    try:
+        return await _openai_oauth_callback(code, state)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post(f"{settings.API_PREFIX}/auth/openai/disconnect")
+async def openai_disconnect(user: dict | None = Depends(get_current_user), user_id: str = "demo-user"):
+    uid = (user or {}).get("user_id") or user_id or "demo-user"
+    await delete_oauth_token(uid, "openai")
+    await log_audit(uid, "oauth_disconnect", {"provider": "openai"})
+    return {"status": "disconnected", "provider": "openai"}
+
+
+class CodexChatRequest(BaseModel):
+    model: Optional[str] = None
+    messages: List[dict] = Field(default_factory=list)
+
+
+@app.post("/internal/codex/v1/chat/completions")
+async def internal_codex_chat(body: CodexChatRequest, request: Request):
+    """OpenAI-compatible shim so Haystack can use ChatGPT OAuth tokens."""
+    from app.services.openai_oauth import codex_chat_completion
+
+    auth = request.headers.get("Authorization") or ""
+    token = auth[7:].strip() if auth.lower().startswith("bearer ") else ""
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing ChatGPT OAuth token")
+    try:
+        return await codex_chat_completion(
+            token, body.messages, model=body.model or settings.OPENAI_OAUTH_MODEL
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # ---------- HITL ----------

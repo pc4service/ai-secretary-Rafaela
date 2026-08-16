@@ -13,7 +13,12 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="el" suppressHydrationWarning>
-      <body className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 antialiased">
+      {/* suppressHydrationWarning: browser extensions (e.g. ColorZilla) inject
+          attributes like cz-shortcut-listen onto <body> before React hydrates. */}
+      <body
+        className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 antialiased"
+        suppressHydrationWarning
+      >
         {children}
       </body>
     </html>

@@ -1,3 +1,30 @@
+# Rafaela – AI Secretary Agent
+
+**Version:** 1.1 · **Updated:** 14 August 2026
+
+GDPR-aware AI executive secretary (Haystack + FastAPI + Next.js).
+
+## Quick start
+
+```bash
+cp .env.example .env    # set OPENAI_API_KEY
+docker compose up --build
+# UI http://localhost:3000 · API http://localhost:8000/docs
+```
+
+### Phase 3 (v1.1)
+
+| Feature | Endpoint / UI |
+|---------|----------------|
+| Streaming chat | `POST /api/v1/chat/stream` (SSE) |
+| Onboarding | Modal on first visit (`OnboardingWizard`) |
+| Conversations | Sidebar list / new / delete |
+
+Classic non-stream chat: `POST /api/v1/chat` still available.
+
+---
+
+
 # Rafaela – AI Secretary Agent  
 ## Πλήρης Τεκμηρίωση & Ανασκόπηση Έργου
 

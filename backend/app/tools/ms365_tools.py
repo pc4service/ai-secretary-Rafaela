@@ -15,9 +15,18 @@ import asyncio
 logger = structlog.get_logger()
 
 
+def _normalize_user_id(user_id: Optional[str] = None) -> str:
+    """Models often pass 'me'/'current'; map those to the app user."""
+    uid = (user_id or "").strip()
+    if uid.lower() in ("", "me", "current", "user", "current_user", "self"):
+        return "demo-user"
+    return uid
+
+
 async def _get_ms_service(user_id: str = "demo-user") -> Microsoft365Service:
     # Silent refresh: returns a valid access token without an OAuth login;
     # raises ReconnectRequired only if the refresh token is gone/revoked.
+    user_id = _normalize_user_id(user_id)
     try:
         token_data = await get_fresh_microsoft_tokens(user_id)
     except ReconnectRequired as e:
