@@ -297,3 +297,107 @@ tools, άρα κάθε pending action γραφόταν και εκτελούντ
 | `/conversations`, `/conversations/{id}/messages`, `/settings` | 401 |
 | `/auth/microsoft/login?user_id=victim`, `/auth/google/login?user_id=victim` | 401 |
 | `/actions/pending`, `/chat` | 401 |
+
+---
+
+## Φάση 6 — 2026-08-18 · Καθολικό authorization audit (report only)
+
+Μετά το P0-6..9 που ξέφυγε, έλεγχος **όλων** των endpoints αντί ανά diff.
+
+### Μεθοδολογία — και ένα λάθος που έπιασα εγκαίρως
+
+Το πρώτο πέρασμα έκανε introspection στο `app.routes` με `isinstance(r, APIRoute)`
+και βρήκε **26** routes. Το πραγματικό OpenAPI schema έχει **34**: το FastAPI
+κρατά τα included routers ένθετα ως `_IncludedRouter`, οπότε ολόκληρο το
+`/api/v1/login/*` ήταν αόρατο. Χωρίς cross-check με το `openapi.json` θα είχα
+ξαναδηλώσει «όλα καθαρά» έχοντας δει το 76% της επιφάνειας.
+
+**Κανόνας για επόμενα audits:** πηγή αλήθειας είναι το `openapi.json` του ζωντανού
+server, όχι το introspection.
+
+### Ευρήματα
+
+| # | Priority | Εύρημα | Κατάσταση |
+|---|----------|--------|-----------|
+| P0-10 | **P0** | `/auth/{microsoft,google}/callback`: το `state` χρησιμοποιείται **απευθείας ως user_id** χωρίς καμία επαλήθευση. Μη-αυθεντικοποιημένος καλών γράφει OAuth tokens σε λογαριασμό της επιλογής του | ✅ done |
+| P1-5 | P1 | `/api/v1/system-prompt` χωρίς auth — εκθέτει πλήρη πολιτική agent, λίστα tools και τους κανόνες anti-injection | ⬜ open |
+| P1-6 | P1 | Hardcoded `http://localhost:3000` redirect στα MS/Google callbacks ενώ αλλού χρησιμοποιείται `settings.FRONTEND_URL` — σπάει το connect flow σε deploy | ✅ done |
+| P1-7 | P1 | `/internal/codex/v1/chat/completions` εκτεθειμένο στη δημόσια πόρτα· bearer relay που θα έπρεπε να είναι internal-only | ⬜ open |
+| P2-7 | P2 | `_oauth_states` και `_pending` in-memory — με >1 worker το login/connect σπάει (state σε worker A, callback σε worker B)· χάνονται σε restart | ⬜ open |
+| P2-8 | P2 | `/docs`, `/redoc`, `/openapi.json` πάντα ενεργά — σε production δημοσιεύουν όλη την επιφάνεια API | ⬜ open |
+| P2-9 | P2 | CORS: `http://localhost:3000` προστίθεται πάντα με `allow_credentials=True`, και σε production | ⬜ open |
+
+### Λεπτομέρεια για το P0-10
+
+Το **σωστό μοτίβο υπάρχει ήδη στο ίδιο αρχείο**: το `_openai_oauth_callback`
+κάνει `pop_pending(state)` και παίρνει το `user_id` από την **αποθηκευμένη**
+εγγραφή, όχι από το URL. Τα login callbacks (`api_auth.py`) επίσης επαληθεύουν
+το state. Μόνο τα δύο integration callbacks αποκλίνουν:
+
+```python
+# ms_callback / google_callback — state == user_id, χωρίς έλεγχο
+await save_oauth_token(user_id=state, provider="microsoft", ...)
+```
+
+Δεν απαιτείται καν αλληλεπίδραση του θύματος: ο επιτιθέμενος καλεί το callback
+με δικό του `code` και `state=<victim>`, και το mailbox/calendar του συνδέεται
+στον λογαριασμό του θύματος. Από εκεί, ο agent του θύματος διαβάζει δεδομένα του
+επιτιθέμενου (data poisoning) και τα προτεινόμενα ραντεβού γράφονται στο δικό
+του ημερολόγιο.
+
+Η διόρθωση του P3-1 (το `state` βγαίνει πλέον από το session κατά την **έναρξη**)
+δεν καλύπτει το callback, που εξακολουθεί να εμπιστεύεται ό,τι του έρθει.
+
+### Επαληθευμένα σωστά
+
+- Login callbacks επαληθεύουν `state` έναντι server-side store ✅
+- `/login/demo` επιστρέφει 403 εκτός `development`/`trial` ✅
+- OpenAI callback: `user_id` από το pending record, όχι από το URL ✅
+- **Κανένα** endpoint δεν δέχεται πλέον `user_id` από query/body ✅
+- Όλα τα user-scoped endpoints αντλούν ταυτότητα από το session ✅
+
+### Πίνακας κάλυψης (34 routes)
+
+| Κατηγορία | Πλήθος |
+|-----------|--------|
+| `require_user` (σκληρό 401) | 7 |
+| `resolve_user_id` (session· demo fallback εκτός production) | 8 |
+| Σκόπιμα δημόσια (`/`, `/health`, `/knowledge/status`, login start/providers/me/logout, demo) | 11 |
+| OAuth callbacks (δημόσια εξ ορισμού — 4 από 4 χρειάζονται state validation· **2 δεν το έχουν**) | 5 |
+| Χωρίς auth, υπό εξέταση (`/system-prompt`, `/internal/codex/*`) | 2 |
+
+---
+
+## Φάση 7 — 2026-08-18 · P0-10 + P1-6
+
+### Τι άλλαξε
+
+| Αρχείο | Αλλαγή |
+|--------|--------|
+| `services/oauth_state.py` | **Νέο.** `issue()` / `consume()` — opaque, single-use, TTL 10′, δεμένο σε provider |
+| `main.py` | `ms_login`/`google_login` εκδίδουν state· τα callbacks το εξαργυρώνουν και παίρνουν από εκεί το `user_id`· redirects μέσω `settings.FRONTEND_URL` |
+
+Το μοτίβο ευθυγραμμίζεται με το `_openai_oauth_callback`, που ήδη το έκανε σωστά.
+
+### Σχεδιαστικές αποφάσεις
+
+- **Single-use + TTL**: ένα state που διέρρευσε από logs/referer δεν ξαναχρησιμοποιείται.
+- **Δέσιμο σε provider**: state του Microsoft flow δεν εξαργυρώνεται στο Google callback.
+- **Redirect σε σελίδα σφάλματος αντί για 400**: ο νόμιμος χρήστης με ληγμένο state
+  βλέπει κάτι χρήσιμο, ενώ η απόρριψη καταγράφεται ως `oauth_state_rejected`.
+- **Παραμένει in-memory** όπως το login store — το P2-7 (Redis) ισχύει και εδώ και
+  τεκμηριώνεται στο docstring.
+
+### Επαλήθευση
+
+```
+85 passed  (από 75· νέο tests/test_oauth_state.py)
+```
+
+Ζωντανή επίθεση στον τρέχοντα server:
+
+| Σενάριο | Πριν | Τώρα |
+|---------|------|------|
+| `GET /auth/microsoft/callback?code=…&state=demo-user` χωρίς session | tokens γράφονταν στον `demo-user` | **307 → `?ms=error`**, κανένα token, warning στα logs |
+| `GET /auth/google/callback?...&state=demo-user` | ομοίως | **307 → `?google=error`** |
+| Νόμιμο flow | `state=demo-user` (το ίδιο το user id) | `state=72hS__0rMEEaLOPqkwl9T-…` (opaque) |

@@ -536,17 +536,25 @@ async def get_settings_info(
 
 @app.get(f"{settings.API_PREFIX}/auth/microsoft/login")
 async def ms_login(uid: str = Depends(resolve_user_id)):
-    # state carries the account the tokens get saved under, so it must come
-    # from the session — never from a caller-chosen query parameter.
+    # state is an opaque token we look up on the way back; the account to bind
+    # is stored here, never read from the callback URL.
+    from app.services.oauth_state import issue
+
     try:
         service = Microsoft365Service()
-        return {"auth_url": service.get_auth_url(state=uid)}
+        return {"auth_url": service.get_auth_url(state=issue(uid, "microsoft"))}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.get(f"{settings.API_PREFIX}/auth/microsoft/callback")
-async def ms_callback(code: str, state: str = "demo-user"):
+async def ms_callback(code: str, state: str = ""):
+    from app.services.oauth_state import consume
+
+    try:
+        uid = consume(state, "microsoft")
+    except ValueError:
+        return RedirectResponse(url=f"{settings.FRONTEND_URL}/?tab=settings&ms=error")
     try:
         # Fresh MSAL cache — the auth-code exchange populates it (AT + RT +
         # account metadata); persisting it enables the enterprise silent path.
@@ -554,7 +562,7 @@ async def ms_callback(code: str, state: str = "demo-user"):
         service = Microsoft365Service(token_cache=msal_cache)
         tokens = service.exchange_code(code)
         await save_oauth_token(
-            user_id=state, provider="microsoft",
+            user_id=uid, provider="microsoft",
             token_data={
                 "access_token": tokens["access_token"],
                 "refresh_token": tokens.get("refresh_token"),
@@ -563,30 +571,44 @@ async def ms_callback(code: str, state: str = "demo-user"):
             expires_in=tokens.get("expires_in"),
             scopes=tokens.get("scope"),
         )
-        await log_audit(state, "oauth_connect", {"provider": "microsoft"})
-        return RedirectResponse(url="http://localhost:3000/?tab=settings&ms=connected")
+        await log_audit(uid, "oauth_connect", {"provider": "microsoft"})
+        return RedirectResponse(
+            url=f"{settings.FRONTEND_URL}/?tab=settings&ms=connected"
+        )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.get(f"{settings.API_PREFIX}/auth/google/login")
 async def google_login(uid: str = Depends(resolve_user_id)):
-    # See ms_login: state decides whose account the tokens land in.
+    # See ms_login: state is opaque and resolved server-side on the way back.
+    from app.services.oauth_state import issue
+
     try:
         service = GoogleWorkspaceService()
-        return {"auth_url": service.get_auth_url(state=uid)}
+        return {"auth_url": service.get_auth_url(state=issue(uid, "google"))}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.get(f"{settings.API_PREFIX}/auth/google/callback")
-async def google_callback(code: str, state: str = "demo-user"):
+async def google_callback(code: str, state: str = ""):
+    from app.services.oauth_state import consume
+
+    try:
+        uid = consume(state, "google")
+    except ValueError:
+        return RedirectResponse(
+            url=f"{settings.FRONTEND_URL}/?tab=settings&google=error"
+        )
     try:
         service = GoogleWorkspaceService()
         token_data = service.exchange_code(code)
-        await save_oauth_token(user_id=state, provider="google", token_data=token_data)
-        await log_audit(state, "oauth_connect", {"provider": "google"})
-        return RedirectResponse(url="http://localhost:3000/?tab=settings&google=connected")
+        await save_oauth_token(user_id=uid, provider="google", token_data=token_data)
+        await log_audit(uid, "oauth_connect", {"provider": "google"})
+        return RedirectResponse(
+            url=f"{settings.FRONTEND_URL}/?tab=settings&google=connected"
+        )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
