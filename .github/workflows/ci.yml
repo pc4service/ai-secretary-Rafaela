@@ -37,6 +37,8 @@ jobs:
           SECRET_KEY: ci-test-secret-key-not-for-production-use
           ENVIRONMENT: trial
           DRY_RUN: "true"
+          # Exercise the strict path: no anonymous demo-user fallback.
+          REQUIRE_AUTH: "true"
           # No Qdrant in CI: indexing reports "skipped", keyword search still works.
           QDRANT_URL: ""
           KNOWLEDGE_DIR: ${{ github.workspace }}/knowledge

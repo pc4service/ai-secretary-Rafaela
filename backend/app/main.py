@@ -69,7 +69,12 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-from app.api_auth import router as login_router, get_current_user, require_user
+from app.api_auth import (
+    router as login_router,
+    get_current_user,
+    require_user,
+    resolve_user_id,
+)
 
 app.include_router(login_router)
 
@@ -101,7 +106,7 @@ async def rate_limit_middleware(request: Request, call_next):
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=8000)
     history: Optional[List[dict]] = Field(default_factory=list)
-    user_id: str = "demo-user"
+    # No user_id: the acting user comes from the session (see resolve_user_id).
     conversation_id: Optional[str] = None
 
 
@@ -233,10 +238,9 @@ async def root():
 
 
 @app.post(f"{settings.API_PREFIX}/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest, raw: Request, user: dict | None = Depends(get_current_user)):
+async def chat(request: ChatRequest, raw: Request, uid: str = Depends(resolve_user_id)):
     try:
-        # Prefer authenticated session user over client-supplied user_id
-        effective_user = (user or {}).get("user_id") or request.user_id or "demo-user"
+        effective_user = uid
         conv = await get_or_create_conversation(effective_user, request.conversation_id)
         conversation_id = conv.id
 
@@ -295,7 +299,7 @@ async def chat(request: ChatRequest, raw: Request, user: dict | None = Depends(g
 
 
 @app.post(f"{settings.API_PREFIX}/chat/stream")
-async def chat_stream(request: ChatRequest, user: dict | None = Depends(get_current_user)):
+async def chat_stream(request: ChatRequest, uid: str = Depends(resolve_user_id)):
     """SSE streaming chat – events: status | delta | done | error (JSON lines after data: )."""
 
     async def event_gen():
@@ -303,7 +307,7 @@ async def chat_stream(request: ChatRequest, user: dict | None = Depends(get_curr
             return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
 
         try:
-            effective_user = (user or {}).get("user_id") or request.user_id or "demo-user"
+            effective_user = uid
             yield sse({"type": "status", "message": "Σύνδεση με τη Rafaela…"})
             conv = await get_or_create_conversation(effective_user, request.conversation_id)
             conversation_id = conv.id
@@ -446,21 +450,23 @@ async def api_knowledge_index(
 # ---------- Conversations ----------
 
 @app.get(f"{settings.API_PREFIX}/conversations")
-async def api_list_conversations(user_id: str = "demo-user"):
-    return await list_conversations(user_id)
+async def api_list_conversations(uid: str = Depends(resolve_user_id)):
+    return await list_conversations(uid)
 
 
 @app.get(f"{settings.API_PREFIX}/conversations/{{conversation_id}}/messages")
-async def api_get_messages(conversation_id: str, user_id: str = "demo-user"):
-    return await get_conversation_messages(conversation_id)
+async def api_get_messages(conversation_id: str, uid: str = Depends(resolve_user_id)):
+    return await get_conversation_messages(conversation_id, user_id=uid)
 
 
 @app.delete(f"{settings.API_PREFIX}/conversations/{{conversation_id}}")
-async def api_delete_conversation(conversation_id: str, user_id: str = "demo-user"):
-    ok = await delete_conversation(user_id, conversation_id)
+async def api_delete_conversation(
+    conversation_id: str, uid: str = Depends(resolve_user_id)
+):
+    ok = await delete_conversation(uid, conversation_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    await log_audit(user_id, "delete_conversation", {"conversation_id": conversation_id})
+    await log_audit(uid, "delete_conversation", {"conversation_id": conversation_id})
     return {"status": "deleted"}
 
 
@@ -474,8 +480,12 @@ def _key_present(value) -> bool:
     return value not in ("sk-...", "sk-ant-...", "fc-...")
 
 @app.get(f"{settings.API_PREFIX}/settings")
-async def get_settings_info(user: dict | None = Depends(get_current_user), user_id: str = "demo-user"):
-    uid = (user or {}).get("user_id") or user_id
+async def get_settings_info(
+    uid: str = Depends(resolve_user_id),
+    # Also needed raw: the UI shows whether this is a real session or the
+    # local demo fallback. FastAPI reuses the cached get_current_user result.
+    user: dict | None = Depends(get_current_user),
+):
     ms_connected = await is_connected(uid, "microsoft")
     ms_info = await get_token_info(uid, "microsoft") if ms_connected else None
     granted = set((ms_info or {}).get("scopes") or [])
@@ -525,10 +535,12 @@ async def get_settings_info(user: dict | None = Depends(get_current_user), user_
 
 
 @app.get(f"{settings.API_PREFIX}/auth/microsoft/login")
-async def ms_login(user_id: str = "demo-user"):
+async def ms_login(uid: str = Depends(resolve_user_id)):
+    # state carries the account the tokens get saved under, so it must come
+    # from the session — never from a caller-chosen query parameter.
     try:
         service = Microsoft365Service()
-        return {"auth_url": service.get_auth_url(state=user_id)}
+        return {"auth_url": service.get_auth_url(state=uid)}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -558,10 +570,11 @@ async def ms_callback(code: str, state: str = "demo-user"):
 
 
 @app.get(f"{settings.API_PREFIX}/auth/google/login")
-async def google_login(user_id: str = "demo-user"):
+async def google_login(uid: str = Depends(resolve_user_id)):
+    # See ms_login: state decides whose account the tokens land in.
     try:
         service = GoogleWorkspaceService()
-        return {"auth_url": service.get_auth_url(state=user_id)}
+        return {"auth_url": service.get_auth_url(state=uid)}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -579,26 +592,27 @@ async def google_callback(code: str, state: str = "demo-user"):
 
 
 @app.post(f"{settings.API_PREFIX}/auth/microsoft/disconnect")
-async def ms_disconnect(user_id: str = "demo-user"):
-    await delete_oauth_token(user_id, "microsoft")
-    await log_audit(user_id, "oauth_disconnect", {"provider": "microsoft"})
+async def ms_disconnect(user: dict = Depends(require_user)):
+    uid = user["user_id"]
+    await delete_oauth_token(uid, "microsoft")
+    await log_audit(uid, "oauth_disconnect", {"provider": "microsoft"})
     return {"status": "disconnected", "provider": "microsoft"}
 
 
 @app.post(f"{settings.API_PREFIX}/auth/google/disconnect")
-async def google_disconnect(user_id: str = "demo-user"):
-    await delete_oauth_token(user_id, "google")
-    await log_audit(user_id, "oauth_disconnect", {"provider": "google"})
+async def google_disconnect(user: dict = Depends(require_user)):
+    uid = user["user_id"]
+    await delete_oauth_token(uid, "google")
+    await log_audit(uid, "oauth_disconnect", {"provider": "google"})
     return {"status": "disconnected", "provider": "google"}
 
 
 # ---------- OpenAI / ChatGPT OAuth ----------
 
 @app.get(f"{settings.API_PREFIX}/auth/openai/login")
-async def openai_login(user: dict | None = Depends(get_current_user), user_id: str = "demo-user"):
+async def openai_login(uid: str = Depends(resolve_user_id)):
     from app.services.openai_oauth import create_login_url
 
-    uid = (user or {}).get("user_id") or user_id or "demo-user"
     return {"auth_url": create_login_url(uid)}
 
 
@@ -648,8 +662,8 @@ async def openai_app_callback(code: str = "", state: str = "", error: str = ""):
 
 
 @app.post(f"{settings.API_PREFIX}/auth/openai/disconnect")
-async def openai_disconnect(user: dict | None = Depends(get_current_user), user_id: str = "demo-user"):
-    uid = (user or {}).get("user_id") or user_id or "demo-user"
+async def openai_disconnect(user: dict = Depends(require_user)):
+    uid = user["user_id"]
     await delete_oauth_token(uid, "openai")
     await log_audit(uid, "oauth_disconnect", {"provider": "openai"})
     return {"status": "disconnected", "provider": "openai"}

@@ -74,6 +74,28 @@ async def require_user(user: Optional[dict] = Depends(get_current_user)) -> dict
     return user
 
 
+DEFAULT_USER_ID = "demo-user"
+
+
+async def resolve_user_id(user: Optional[dict] = Depends(get_current_user)) -> str:
+    """
+    The user a request acts as, taken from the session only.
+
+    A client-supplied user_id is never consulted — that was how callers used to
+    read other people's conversations. Without a session this falls back to the
+    demo user for local development, unless REQUIRE_AUTH is set or we are in
+    production, where it is a 401.
+
+    Use this for user-scoped reads. Endpoints that change external state should
+    depend on require_user instead, so they always need a real session.
+    """
+    if user:
+        return user["user_id"]
+    if settings.auth_required:
+        raise HTTPException(status_code=401, detail="Authentication required. Please sign in.")
+    return DEFAULT_USER_ID
+
+
 @router.get("/providers")
 async def list_login_providers():
     """Which identity providers are configured."""

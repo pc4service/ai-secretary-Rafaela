@@ -224,6 +224,76 @@ tools, άρα κάθε pending action γραφόταν και εκτελούντ
 
 | # | Θέμα | Κατάσταση |
 |---|------|-----------|
-| P3-1 | `REQUIRE_AUTH` αναφέρεται σε `SECURITY.md`/CI αλλά δεν υπάρχει στο `config.py` | ⬜ open |
+| P3-1 | `REQUIRE_AUTH` αναφέρεται σε `SECURITY.md`/CI αλλά δεν υπάρχει στο `config.py` | ✅ done |
 | P3-2 | Το `knowledge/` είναι κοινό για όλους τους χρήστες — δεν υπάρχει per-tenant διαχωρισμός | ⬜ open |
 | P3-3 | Rate limiter in-memory per-IP — δεν αντέχει multi-worker/multi-instance (θέλει Redis) | ⬜ open |
+
+---
+
+## Φάση 5 — 2026-08-18 · P3-1 (REQUIRE_AUTH) + IDOR στις συνομιλίες
+
+### ⚠ Εύρημα P0 που είχε ξεφύγει από τη Φάση 1
+
+Υλοποιώντας το `REQUIRE_AUTH` βρέθηκε ότι τα `/conversations/*` είχαν **την ίδια
+ευπάθεια με τα `/actions/*`**, στα πιο ευαίσθητα δεδομένα του προϊόντος:
+
+| # | Εύρημα | Κατάσταση |
+|---|--------|-----------|
+| P0-6 | `GET /conversations?user_id=X` — λίστα συνομιλιών οποιουδήποτε χρήστη | ✅ done |
+| P0-7 | `GET /conversations/{id}/messages` — **καμία απολύτως** επαλήθευση ιδιοκτησίας· το `get_conversation_messages()` δεν δεχόταν καν `user_id`. Όποιος ήξερε ένα conversation id διάβαζε το ιστορικό | ✅ done |
+| P0-8 | `DELETE /conversations/{id}?user_id=X` — διαγραφή συνομιλίας άλλου χρήστη | ✅ done |
+| P0-9 | `/auth/{ms,google}/login?user_id=X` — το OAuth `state` καθόριζε σε ποιον λογαριασμό αποθηκεύονται τα tokens | ✅ done |
+
+**Γιατί ξέφυγε:** η Φάση 1 σκόπιμα περιορίστηκε στο diff (knowledge/Firecrawl) και
+επεκτάθηκε στο HITL μόνο επειδή το `knowledge_save_page` περνά από εκεί. Τα
+`/conversations/*` δεν ήταν στο diff. Μάθημα: ο έλεγχος «ποια endpoints δέχονται
+`user_id` από τον client» έπρεπε να γίνει καθολικά από την αρχή, όχι ανά diff.
+
+### Τι άλλαξε
+
+| Αρχείο | Αλλαγή |
+|--------|--------|
+| `core/config.py` | `REQUIRE_AUTH: bool = False` + property `auth_required` (πάντα True σε production) |
+| `api_auth.py` | `resolve_user_id()` — ταυτότητα **μόνο** από session· 401 όταν `auth_required`, αλλιώς demo fallback για local dev |
+| `services/conversation.py` | `get_conversation_messages(..., user_id=None)` με join στο `Conversation.user_id` |
+| `main.py` | `/conversations/*`, `/settings`, `/chat`, `/chat/stream`, `/auth/*/login` → `resolve_user_id`· `/auth/*/disconnect` → `require_user`· `user_id` αφαιρέθηκε από το `ChatRequest` |
+| `.env.example`, `docs/SECURITY.md`, `ci.yml` | Τεκμηρίωση· το CI τρέχει πλέον με `REQUIRE_AUTH=true` |
+
+### Σχεδιαστικές αποφάσεις
+
+- **Δύο επίπεδα**: `require_user` (σκληρό 401) για ενέργειες που αλλάζουν
+  εξωτερική κατάσταση — approve/reject, disconnect. `resolve_user_id` (demo
+  fallback εκτός production) για user-scoped reads, ώστε να μη σπάσει το local
+  `curl`. Σε production δεν υπάρχει διαφορά: και τα δύο απαιτούν session.
+- **Η production δεν εμπιστεύεται το flag**: το `auth_required` επιστρέφει True
+  σε production ακόμη κι αν `REQUIRE_AUTH=false`, γιατί ένα λάθος `.env` δεν
+  πρέπει να ανοίγει τα δεδομένα όλων.
+- **Το `user_id` στο `get_conversation_messages` παραμένει optional**, ώστε
+  internal callers που έχουν ήδη φορτώσει τη συνομιλία για γνωστό ιδιοκτήτη να
+  μην επαναλαμβάνουν τον έλεγχο — αλλά το docstring λέει ρητά ότι κάθε request
+  path οφείλει να το περνά.
+
+### Επαλήθευση
+
+```
+75 passed  (από 63· νέο tests/test_require_auth.py)
+75 passed  και με REQUIRE_AUTH=true
+```
+
+Ζωντανός έλεγχος IDOR (πριν/μετά, με πραγματική DB):
+
+| Σενάριο | Αποτέλεσμα |
+|---------|-----------|
+| Ιδιοκτήτης διαβάζει τη συνομιλία του | 1 μήνυμα ✅ |
+| Επιτιθέμενος διαβάζει την ίδια συνομιλία | **0 μηνύματα** |
+| Επιτιθέμενος τη βλέπει στη λίστα του | False |
+| Επιτιθέμενος τη διαγράφει | False |
+
+Ζωντανός έλεγχος με `REQUIRE_AUTH=true` (uvicorn σε δεύτερο port):
+
+| Endpoint | Anonymous |
+|----------|-----------|
+| `/health`, `/knowledge/status` | 200 (σκόπιμα ανοιχτά) |
+| `/conversations`, `/conversations/{id}/messages`, `/settings` | 401 |
+| `/auth/microsoft/login?user_id=victim`, `/auth/google/login?user_id=victim` | 401 |
+| `/actions/pending`, `/chat` | 401 |
