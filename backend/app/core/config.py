@@ -109,6 +109,14 @@ class Settings(BaseSettings):
     DEFAULT_RETENTION_DAYS: int = 30
     AUDIT_LOG_RETENTION_DAYS: int = 365
 
+    # Knowledge / RAG
+    # Host path is mounted in docker-compose; container default /knowledge
+    KNOWLEDGE_DIR: str = "/knowledge"
+    QDRANT_URL: Optional[str] = None  # e.g. http://qdrant:6333 — optional
+    KNOWLEDGE_COLLECTION: str = "rafaela_knowledge"
+    KNOWLEDGE_TOP_K: int = 5
+    KNOWLEDGE_EMBED_MODEL: str = "text-embedding-3-small"
+
 
 settings = Settings()
 

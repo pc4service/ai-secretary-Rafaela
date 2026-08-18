@@ -1,93 +1,73 @@
 # Rafaela AI Secretary — Ανακεφαλαίωση & Επαγγελματικό Roadmap
 
-**Έκδοση εγγράφου:** 1.1  
-**Ημερομηνία:** 14 Αυγούστου 2026  
+**Έκδοση εγγράφου:** 1.2  
+**Ημερομηνία:** 16 Αυγούστου 2026  
 **Στόχος:** Από trial prototype → πλήρες, παρουσιάσιμο και εμπορεύσιμο προϊόν για εταιρική χρήση.
 
 ---
 
-## Πρόοδος υλοποίησης (ενημέρωση 14 Αυγούστου 2026)
+## Πρόοδος υλοποίησης (ενημέρωση 16 Αυγούστου 2026)
 
-### Package release v1.1 (14 Αυγούστου 2026)
-
-**Αρχείο download:** `Rafaela-AI-Secretary-Agent-v1.1.zip`
-
-| Περιεχόμενο στο zip | Κατάσταση |
-|---------------------|-----------|
-| Core agent (Haystack Rafaela), HITL, MS/Google tools | ✅ |
-| Docker compose (dev + prod), scripts, CI workflow | ✅ |
-| Frontend: Chat streaming, Onboarding, Conversation sidebar, Settings, Pending actions | ✅ |
-| Docs: ROADMAP, DOCUMENTATION, DEPLOY, SECURITY, NGINX, PRODUCTION | ✅ |
-| Phase 2 extras (orgs/billing/RAG files) | Μερικά αναφέρονται στο roadmap· επαν-υλοποίηση αν λείπουν από tree |
+Κατάσταση **από το πραγματικό tree** (όχι από το zip v1.1). Root project: `C:\DEVELOP\ai-secretary` (όχι `ai-secretary-agent/`).
 
 **Γρήγορη εκκίνηση**
 
 ```bash
-unzip Rafaela-AI-Secretary-Agent-v1.1.zip
-cd ai-secretary-agent
-cp .env.example .env   # βάλε OPENAI_API_KEY
+cd C:\DEVELOP\ai-secretary
+cp .env.example .env
 docker compose up --build
-# http://localhost:3000
+# http://localhost:3000  → Demo login
 ```
 
-**Νέο στο v1.1 (Phase 3)**
-- Onboarding wizard (4 βήματα, skip / επαναφορά)
-- SSE streaming chat (`/api/v1/chat/stream`)
-- Sidebar συνομιλιών (νέα / επιλογή / διαγραφή)
+### Ολοκληρωμένα vs εκκρεμή
 
+| # | Πρόταση | Κατάσταση | Σημείωση |
+|---|---------|-----------|----------|
+| 1 | Login (Demo / Google / MS identity) | ✅ | `api_auth.py` · cookie session |
+| 2 | Integration OAuth MS365 + Google | ✅ | Silent refresh MS · mail **read-only** |
+| 3 | ChatGPT / Codex OAuth (Settings) | ✅ | `openai_oauth.py` · callback `:1455` |
+| 4 | LLM failover + timeout | ✅ | `llm_router.py` |
+| 5 | HITL + DRY_RUN | ✅ | Calendar propose · email send **όχι** registered |
+| 6 | Streaming + onboarding + sidebar | ✅ | Phase 3 UI |
+| 7 | Knowledge **keyword** RAG | ✅ | `knowledge/*.md` + `search_knowledge` |
+| 8 | Knowledge **semantic** (Qdrant) | ✅ | compose `qdrant` + hybrid search + keyword fallback |
+| 9 | `REQUIRE_AUTH` lock σε όλα τα API | ❌ | Docs το ανέφεραν· **δεν** υπάρχει στο `config.py` |
+| 10 | Unit tests `backend/tests/` | ❌ | Λείπει ο φάκελος |
+| 11 | CI compose check | ✅ | `.github/workflows/ci.yml` |
+| 12 | Deploy / Security / Nginx docs | ✅ | `docs/DEPLOY.md` κ.λπ. |
+| 13 | Multi-tenant / Stripe / org UI | ❌ | Μόνο στα docs — **όχι** στο tree |
+| 14 | Graphify / ECC / UI-UX Pro Max | ℹ️ | Skills του assistant, **όχι** runtime Rafaela |
 
+### Knowledge σήμερα
 
-### Ολοκληρωμένα στο codebase
+- Φάκελος `knowledge/` (8 πρότυπα md) mount στο container ως `/knowledge`.
+- Keyword search: `GET /api/v1/knowledge/search?q=…` και tool `search_knowledge`.
+- Qdrant **δεν** είναι στο `docker-compose.yml`. Χωρίς `QDRANT_URL` το index επιστρέφει `skipped`.
+- **Επόμενο τεχνικό βήμα Phase 1:** semantic index (Qdrant + embeddings) πάνω στο υπάρχον public API.
 
-| # | Πρόταση | Κατάσταση | Αρχεία |
-|---|---------|-----------|--------|
-| 1 | **Υποχρεωτικό auth** (`REQUIRE_AUTH`) | ✅ | `main.py`, `config.py`, `api_auth.py` |
-| 2 | **RAG skeleton** (Qdrant + keyword fallback) | ✅ | `services/knowledge.py`, `docker-compose.yml` (qdrant), `knowledge/**` |
-| 3 | **Tool `search_knowledge`** | ✅ | `tools/knowledge_tools.py`, `secretary_agent.py` |
-| 4 | **Unit tests** (auth + knowledge) | ✅ | `backend/tests/` — `make test-unit` |
-| 5 | **E2E smoke** (login → knowledge → chat) | ✅ | `scripts/e2e_smoke.sh` — `make e2e` |
-| 6 | **CI** GitHub Actions | ✅ | `.github/workflows/ci.yml` |
-| 7 | **Deploy runbook** pilot | ✅ | `docs/DEPLOY.md` |
-| 8 | **Security checklist** | ✅ | `docs/SECURITY.md` |
-| 9 | **Pilot deploy script** | ✅ | `scripts/pilot_deploy.sh` |
-| 10 | **Multi-tenant skeleton** | ✅ | `Organization`, `OrgMember`, `/api/v1/orgs` |
-| 11 | **Tenant isolation 2b** | ✅ | `org_id` + filters σε tokens/conversations/actions |
-| 12 | **Stripe billing 2c** | ✅ | `/billing/plans|checkout|webhook` + mock mode |
-| 13 | **Org switcher UI** | ⚠️ docs / partial restore | Βλ. σημείωση package |
-| 14 | **Phase 3 Onboarding** | ✅ | `OnboardingWizard.tsx` |
-| 15 | **Phase 3 Streaming SSE** | ✅ | `POST /api/v1/chat/stream` + `streamChat()` |
-| 16 | **Conversation sidebar** | ✅ | `ConversationSidebar.tsx` |
-
-### Πώς τρέχεις τα 3 επίπεδα ελέγχου
-
-```bash
-# A. Unit (χωρίς Docker stack)
-make test-unit
-
-# B. Stack up
-docker compose up --build -d
-# Demo login στο browser ή:
-make e2e
-
-# C. Semantic index (προαιρετικό, χρειάζεται OPENAI_API_KEY)
-# Μετά demo login, cookie session, ή από container:
-docker compose exec backend python -c "from app.services.knowledge import index_knowledge_to_qdrant; print(index_knowledge_to_qdrant(recreate=True))"
-```
-
-### Phase 0 / Phase 1 checklist (ενημερωμένο)
+### Phase 0 / Phase 1 checklist (αληθινό)
 
 - [x] HITL + DRY_RUN + Docker trial
 - [x] Login (Demo / Google / MS) vs Integration OAuth
-- [x] Auth lock στα sensitive endpoints
-- [x] Knowledge samples + search tool
-- [x] Unit + E2E scripts
-- [x] CI (GitHub Actions → unit tests + compose config)
-- [x] Pilot deploy runbook (`docs/DEPLOY.md`)
-- [x] Security checklist (`docs/SECURITY.md`)
-- [x] Pilot deploy script + runbook (εκτέλεση στο host του πελάτη)
-- [x] Multi-tenant skeleton (orgs API)
-- [x] Full tenant isolation (org_id σε conversations/tokens/pending + filters) (Phase 2b)
-- [x] Stripe billing skeleton + UI plans (Phase 2c)
+- [x] Knowledge samples + **keyword** search tool
+- [ ] Auth lock (`REQUIRE_AUTH`) σε chat / actions / conversations
+- [x] Qdrant + semantic `index_knowledge_to_qdrant` (hybrid + keyword fallback)
+- [ ] Unit tests + πράσινο `make test-unit`
+- [x] CI (compose config)
+- [x] Pilot deploy runbook + security checklist
+- [ ] Multi-tenant / Stripe (Phase 2 — μετά τον pilot)
+
+### Πώς τρέχεις ελέγχους
+
+```bash
+docker compose up --build -d
+curl -sf http://localhost:8000/health
+curl -sf "http://localhost:8000/api/v1/knowledge/status"
+# search επιστρέφει εσωτερικό περιεχόμενο → θέλει session
+curl -sf -c /tmp/r.jar -X POST http://localhost:8000/api/v1/login/demo
+curl -sf -b /tmp/r.jar "http://localhost:8000/api/v1/knowledge/search?q=follow-up"
+# Chat στο browser μετά Demo login
+```
 
 ---
 
@@ -537,14 +517,14 @@ python scripts/index_knowledge.py --path knowledge/ --recreate
 
 ---
 
-## Επόμενη άμεση ενέργεια (αυτή την εβδομάδα)
+## Επόμενη άμεση ενέργεια (16 Αυγούστου 2026)
 
 ```text
-□ Git remote + προστασία main
-□ E2E checklist σε καθαρό μηχάνημα
-□ Απόφαση hosting pilot: Proxmox Tunnel vs VPS
-□ Ξεκίνημα Phase 1.1–1.5 (auth lock + RAG skeleton)
-□ 1 εσωτερικό demo στην ομάδα πωλήσεων
+□ Ολοκλήρωση RAG Phase B: Qdrant στο compose + πραγματικό index_knowledge_to_qdrant
+□ Keyword παραμένει fallback (ήδη δουλεύει)
+□ Μην αντικαταστήσεις το Haystack RAG με Graphify/ECC (skills ανάπτυξης)
+□ UI/UX Pro Max μόνο όταν φτιαχτεί οθόνη knowledge στο frontend
+□ Μετά: REQUIRE_AUTH lock · unit tests · μετά Phase 2
 ```
 
 ---

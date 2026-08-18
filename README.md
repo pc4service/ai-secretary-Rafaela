@@ -5,22 +5,21 @@ Professional AI Executive Secretary powered by **Haystack**, **Firecrawl**, Micr
 ## Features
 
 - **Rafaela** – bilingual (Greek/English) AI secretary
-- **Microsoft 365** & **Google Workspace** (OAuth + Mail + Calendar)
-- **Human-in-the-loop** – every write action requires explicit approval
-- **Conversation memory** – chat history persisted in PostgreSQL
-- **Encrypted OAuth tokens** (Fernet)
-- **Audit log** for GDPR accountability
-- **Rate limiting** (60 req/min per IP)
-- **Dry-run / Trial mode** by default
-- Modern Next.js UI: Chat · Ενέργειες · Ρυθμίσεις
+- **Microsoft 365** & **Google Workspace** (OAuth · Mail **read-only** · Calendar HITL)
+- **ChatGPT OAuth** – Sign in with ChatGPT from Settings (no Platform key required)
+- **Knowledge (keyword RAG)** – templates in `knowledge/` via `search_knowledge`
+- **Human-in-the-loop** – calendar writes require approval
+- **Conversation memory** – PostgreSQL + sidebar
+- **Streaming chat** (SSE) + onboarding wizard
+- Encrypted OAuth tokens, audit log, rate limit, `DRY_RUN=true` by default
+
+Semantic RAG (Qdrant) is **not** implemented yet — keyword search works without it.
 
 ## Quick Start
 
 ```bash
-cd ai-secretary-agent
+cd C:\DEVELOP\ai-secretary
 cp .env.example .env
-# Set at least OPENAI_API_KEY=sk-...
-
 docker compose up --build
 ```
 
@@ -32,9 +31,9 @@ docker compose up --build
 
 ## UI Tabs
 
-1. **Chat** – talk to Rafaela; approve/reject inline when she proposes actions
-2. **Ενέργειες** – full list of pending actions + history
-3. **Ρυθμίσεις** – connect/disconnect Microsoft & Google, GDPR status
+1. **Chat** – talk to Rafaela; approve/reject calendar proposals
+2. **Ενέργειες** – pending actions + history
+3. **Ρυθμίσεις** – Microsoft, Google, ChatGPT OAuth, GDPR flags
 
 ## Architecture highlights
 
@@ -42,14 +41,15 @@ docker compose up --build
 - Conversations + messages in DB for memory
 - `pending_actions` table for HITL workflow
 - `audit_logs` for every significant event
-- Simple rate limiter middleware
+- `knowledge/` markdown + keyword search
+- LLM failover (`llm_router.py`)
 
 ## OAuth setup
 
-See previous README section / Azure Portal + Google Cloud Console.
-Redirect URIs:
+Redirect URIs (local):
 - `http://localhost:8000/api/v1/auth/microsoft/callback`
 - `http://localhost:8000/api/v1/auth/google/callback`
+- ChatGPT / Codex: `http://localhost:1455/auth/callback` (published in compose)
 
 ## GDPR
 

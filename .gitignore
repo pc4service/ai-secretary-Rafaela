@@ -39,3 +39,6 @@ yarn-error.log*
 
 # Local data volumes (fallback names)
 postgres_data/
+
+# TypeScript incremental build cache
+frontend/tsconfig.tsbuildinfo
