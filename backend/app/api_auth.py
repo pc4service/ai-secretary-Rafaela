@@ -18,6 +18,7 @@ from app.services.auth import (
     exchange_microsoft_login_code,
     new_oauth_state,
 )
+from app.services.state_store import StateStore
 from app.services.token_store import ensure_user
 from app.models.database import AsyncSessionLocal
 from app.services.conversation import log_audit
@@ -25,8 +26,8 @@ from app.services.conversation import log_audit
 logger = structlog.get_logger()
 router = APIRouter(prefix=f"{settings.API_PREFIX}/login", tags=["login"])
 
-# Simple in-memory state store for OAuth CSRF (use Redis in production)
-_oauth_states: dict = {}
+# OAuth CSRF state, shared across workers via Redis when available.
+_login_states = StateStore("login", 600)
 
 
 def _set_session_cookie(response: Response, token: str) -> None:
@@ -111,7 +112,7 @@ async def login_google_start():
     if not settings.GOOGLE_CLIENT_ID:
         raise HTTPException(400, "Google login not configured")
     state = new_oauth_state()
-    _oauth_states[state] = "google"
+    _login_states.put(state, {"provider": "google"})
     url = get_google_login_url(state, settings.GOOGLE_LOGIN_REDIRECT_URI)
     return {"auth_url": url}
 
@@ -120,9 +121,9 @@ async def login_google_start():
 async def login_google_callback(code: str = "", state: str = "", error: str = ""):
     if error:
         return RedirectResponse(f"{settings.FRONTEND_URL}/login?error={error}")
-    if not code or state not in _oauth_states:
+    record = _login_states.pop(state) if code else None
+    if not record or record.get("provider") != "google":
         return RedirectResponse(f"{settings.FRONTEND_URL}/login?error=invalid_state")
-    _oauth_states.pop(state, None)
     try:
         info = await exchange_google_login_code(code, settings.GOOGLE_LOGIN_REDIRECT_URI)
         async with AsyncSessionLocal() as session:
@@ -144,7 +145,7 @@ async def login_microsoft_start():
     if not settings.MS_CLIENT_ID:
         raise HTTPException(400, "Microsoft login not configured")
     state = new_oauth_state()
-    _oauth_states[state] = "microsoft"
+    _login_states.put(state, {"provider": "microsoft"})
     url = get_microsoft_login_url(state, settings.MS_LOGIN_REDIRECT_URI)
     return {"auth_url": url}
 
@@ -153,9 +154,9 @@ async def login_microsoft_start():
 async def login_microsoft_callback(code: str = "", state: str = "", error: str = ""):
     if error:
         return RedirectResponse(f"{settings.FRONTEND_URL}/login?error={error}")
-    if not code or state not in _oauth_states:
+    record = _login_states.pop(state) if code else None
+    if not record or record.get("provider") != "microsoft":
         return RedirectResponse(f"{settings.FRONTEND_URL}/login?error=invalid_state")
-    _oauth_states.pop(state, None)
     try:
         info = await exchange_microsoft_login_code(code, settings.MS_LOGIN_REDIRECT_URI)
         async with AsyncSessionLocal() as session:

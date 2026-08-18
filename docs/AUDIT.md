@@ -323,7 +323,7 @@ server, όχι το introspection.
 | P1-5 | P1 | `/api/v1/system-prompt` χωρίς auth — εκθέτει πλήρη πολιτική agent, λίστα tools και τους κανόνες anti-injection | ⬜ open |
 | P1-6 | P1 | Hardcoded `http://localhost:3000` redirect στα MS/Google callbacks ενώ αλλού χρησιμοποιείται `settings.FRONTEND_URL` — σπάει το connect flow σε deploy | ✅ done |
 | P1-7 | P1 | `/internal/codex/v1/chat/completions` εκτεθειμένο στη δημόσια πόρτα· bearer relay που θα έπρεπε να είναι internal-only | ⬜ open |
-| P2-7 | P2 | `_oauth_states` και `_pending` in-memory — με >1 worker το login/connect σπάει (state σε worker A, callback σε worker B)· χάνονται σε restart | ⬜ open |
+| P2-7 | P2 | `_oauth_states` και `_pending` in-memory — με >1 worker το login/connect σπάει (state σε worker A, callback σε worker B)· χάνονται σε restart | ✅ done |
 | P2-8 | P2 | `/docs`, `/redoc`, `/openapi.json` πάντα ενεργά — σε production δημοσιεύουν όλη την επιφάνεια API | ⬜ open |
 | P2-9 | P2 | CORS: `http://localhost:3000` προστίθεται πάντα με `allow_credentials=True`, και σε production | ⬜ open |
 
@@ -401,3 +401,50 @@ await save_oauth_token(user_id=state, provider="microsoft", ...)
 | `GET /auth/microsoft/callback?code=…&state=demo-user` χωρίς session | tokens γράφονταν στον `demo-user` | **307 → `?ms=error`**, κανένα token, warning στα logs |
 | `GET /auth/google/callback?...&state=demo-user` | ομοίως | **307 → `?google=error`** |
 | Νόμιμο flow | `state=demo-user` (το ίδιο το user id) | `state=72hS__0rMEEaLOPqkwl9T-…` (opaque) |
+
+---
+
+## Φάση 8 — 2026-08-18 · P2-7 (shared OAuth state)
+
+### Τι άλλαξε
+
+| Αρχείο | Αλλαγή |
+|--------|--------|
+| `services/state_store.py` | **Νέο.** `StateStore(namespace, ttl)` με `put`/`pop`· Redis όταν είναι διαθέσιμο, αλλιώς per-process fallback |
+| `api_auth.py` | `_oauth_states` dict → `StateStore("login", 600)`· ο έλεγχος επαληθεύει και τον provider |
+| `services/openai_oauth.py` | `_pending` dict → `StateStore("openai_oauth", 600)` (κρατά το PKCE verifier) |
+| `services/oauth_state.py` | Χρησιμοποιεί `StateStore`· έφυγε η χειροκίνητη λογική TTL/prune |
+
+Και τα τρία in-memory stores που εντόπισε η Φάση 6 μεταφέρθηκαν.
+
+### Σχεδιαστικές αποφάσεις
+
+- **Sync κλήσεις**: ένα μικρό round trip ανά OAuth flow (όχι ανά request), οπότε
+  το κόστος είναι αμελητέο και κανένα call site δεν χρειάστηκε να γίνει async.
+- **Fallback αντί για σφάλμα**: αν λείπει/πέσει το Redis, ο κάθε process
+  χρησιμοποιεί δικό του dict. Σωστό για single worker και όχι χειρότερο από πριν.
+  Καλύπτεται με test όπου ο client πετάει exception.
+- **Παράπλευρο κέρδος ασφάλειας**: το single-use είναι πλέον **καθολικό**. Πριν,
+  ένα replayed state που έφτανε σε άλλο worker θα γινόταν δεκτό.
+- **TTL από το Redis** (`SETEX`), όχι χειροκίνητο prune — επιβεβαιώθηκε `ttl=600`.
+
+### Επαλήθευση
+
+```
+94 passed  (από 85· νέο tests/test_state_store.py)
+```
+
+Το ουσιαστικό τεστ — state που εκδίδεται σε μία διεργασία, εξαργυρώνεται σε **άλλη**
+(δύο ξεχωριστά `python` invocations στη θέση δύο workers):
+
+```
+worker A issued: 2yASEqNOk4Q7Ii10k1n9yFCtqhbyTNJG
+worker B resolved user: google-worker-A
+replay rejected (good)
+```
+
+| Έλεγχος | Αποτέλεσμα |
+|---------|-----------|
+| Εγγραφές όντως στο Redis με TTL | `keys=2`, `ttl=600` |
+| Login callback με πλαστό state | 307 → `?error=invalid_state` |
+| `/health`, demo login, `/settings`, `/conversations` | 200 |

@@ -1,24 +1,17 @@
 """OAuth state must decide the account to bind — never the callback URL."""
 
-import time
-
 import pytest
 from fastapi.testclient import TestClient
 
 from app.core.config import settings
 from app.main import app
-from app.services import oauth_state
 from app.services.oauth_state import consume, issue
 
 API = settings.API_PREFIX
 client = TestClient(app)
 
-
-@pytest.fixture(autouse=True)
-def clean_store():
-    oauth_state._pending.clear()
-    yield
-    oauth_state._pending.clear()
+# States are random tokens, so tests cannot collide and need no cleanup.
+# TTL and backend behaviour are covered in test_state_store.py.
 
 
 def test_issued_state_resolves_to_the_issuing_user():
@@ -54,16 +47,6 @@ def test_state_cannot_cross_providers():
     state = issue("google-123", "microsoft")
     with pytest.raises(ValueError):
         consume(state, "google")
-
-
-def test_expired_state_is_rejected(monkeypatch):
-    state = issue("google-123", "microsoft")
-    # Capture the real clock first: oauth_state.time is the shared time module,
-    # so a lambda calling time.time() would patch itself into recursion.
-    later = time.time() + oauth_state.STATE_TTL_SECONDS + 1
-    monkeypatch.setattr(oauth_state.time, "time", lambda: later)
-    with pytest.raises(ValueError):
-        consume(state, "microsoft")
 
 
 # --- endpoint behaviour ---

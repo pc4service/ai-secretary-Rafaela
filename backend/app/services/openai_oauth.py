@@ -32,8 +32,11 @@ DEFAULT_REDIRECT_URI = "http://localhost:1455/auth/callback"
 SCOPE = "openid profile email offline_access"
 CODEX_BASE = "https://chatgpt.com/backend-api/codex"
 
-# state -> {verifier, user_id, created}
-_pending: Dict[str, Dict[str, Any]] = {}
+# state -> {verifier, user_id}. Shared across workers: the callback can land on
+# a different process than the one that generated the PKCE verifier.
+from app.services.state_store import StateStore
+
+_pending = StateStore("openai_oauth", 600)
 
 
 def _b64url(data: bytes) -> str:
@@ -53,7 +56,7 @@ def redirect_uri() -> str:
 def create_login_url(user_id: str) -> str:
     verifier, challenge = _pkce_pair()
     state = secrets.token_urlsafe(24)
-    _pending[state] = {"verifier": verifier, "user_id": user_id, "created": time.time()}
+    _pending.put(state, {"verifier": verifier, "user_id": user_id})
     params = {
         "response_type": "code",
         "client_id": CLIENT_ID,
@@ -70,7 +73,7 @@ def create_login_url(user_id: str) -> str:
 
 
 def pop_pending(state: str) -> Optional[Dict[str, Any]]:
-    return _pending.pop(state, None)
+    return _pending.pop(state)
 
 
 async def exchange_code(code: str, verifier: str) -> Dict[str, Any]:
