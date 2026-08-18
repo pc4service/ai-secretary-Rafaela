@@ -27,7 +27,7 @@ from app.services.token_store import (
     is_connected,
     get_token_info,
 )
-from app.services.pending_actions import resolve_action, list_pending_for_user, get_pending_action
+from app.services.pending_actions import resolve_action, list_pending_for_user
 from app.services.microsoft import Microsoft365Service
 from app.services.google import GoogleWorkspaceService
 from app.services.conversation import (
@@ -52,6 +52,13 @@ RATE_WINDOW = 60  # seconds
 async def lifespan(app: FastAPI):
     await init_db()
     logger.info("database_initialized")
+    try:
+        from app.services.knowledge import index_knowledge_to_qdrant
+
+        result = await asyncio.to_thread(index_knowledge_to_qdrant, False)
+        logger.info("knowledge_index_startup", **{k: result.get(k) for k in ("status", "chunks", "embedder", "reason")})
+    except Exception:
+        logger.warning("knowledge_index_startup_failed")
     yield
 
 
@@ -108,7 +115,8 @@ class ChatResponse(BaseModel):
 
 class ActionResolveRequest(BaseModel):
     approve: bool
-    user_id: str = "demo-user"
+    # No user_id: the acting user comes from the session, and the executing user
+    # comes from the action's stored owner.
 
 
 class HealthResponse(BaseModel):
@@ -121,8 +129,21 @@ class HealthResponse(BaseModel):
 
 # ---------- Action executor ----------
 
-async def execute_action(action_type: str, payload: dict) -> str:
-    user_id = payload.get("user_id", "demo-user")
+# Mail is read-only by design (see AGENTS.md). The send tools are not registered
+# with the agent and the OAuth scopes omit Mail.Send/gmail.send; this set is the
+# last line of defence so a stored action can never trigger a real send.
+BLOCKED_ACTION_TYPES = {"ms_send_email", "google_send_email"}
+
+
+async def execute_action(action_type: str, payload: dict, user_id: str) -> str:
+    """Execute an approved action. user_id is the action's stored owner."""
+    if action_type in BLOCKED_ACTION_TYPES:
+        logger.warning("blocked_action_type", action_type=action_type, user_id=user_id)
+        raise ValueError(
+            "Email sending is disabled — Rafaela is read-only for mail. "
+            "Ask for a draft instead."
+        )
+
     from app.services.token_store import get_oauth_token, get_fresh_microsoft_tokens, ReconnectRequired
 
     if action_type == "ms_send_email":
@@ -170,6 +191,25 @@ async def execute_action(action_type: str, payload: dict) -> str:
         )
         await log_audit(user_id, "google_create_event", {"summary": payload["summary"]})
         return str(result)
+
+    elif action_type == "knowledge_save_page":
+        from app.services.knowledge import save_knowledge_markdown, index_knowledge_to_qdrant
+
+        filename = payload.get("filename") or "website-import.md"
+        content = payload.get("content") or ""
+        if not content.strip():
+            raise ValueError("Empty knowledge content")
+        dest = save_knowledge_markdown(filename, content)
+        index_result = index_knowledge_to_qdrant(recreate=False)
+        await log_audit(
+            user_id,
+            "knowledge_save_page",
+            {"filename": dest.name, "url": payload.get("url"), "index": index_result.get("status")},
+        )
+        return (
+            f"Saved {dest.name}. Qdrant index: {index_result.get('status')} "
+            f"({index_result.get('chunks', '?')} chunks)."
+        )
 
     raise ValueError(f"Unknown action type: {action_type}")
 
@@ -351,6 +391,56 @@ async def chat_stream(request: ChatRequest, user: dict | None = Depends(get_curr
 @app.get(f"{settings.API_PREFIX}/system-prompt")
 async def get_system_prompt():
     return {"system_prompt": SECRETARY_SYSTEM_PROMPT}
+
+
+# ---------- Knowledge / RAG ----------
+
+@app.get(f"{settings.API_PREFIX}/knowledge/status")
+async def api_knowledge_status(user: dict | None = Depends(get_current_user)):
+    """
+    Knowledge base availability, file/chunk counts, search modes.
+    Left unauthenticated on purpose: it is the documented health probe and
+    returns counts and filenames only — never document content.
+    """
+    from app.services.knowledge import knowledge_status
+
+    return knowledge_status()
+
+
+@app.get(f"{settings.API_PREFIX}/knowledge/search")
+async def api_knowledge_search(
+    q: str = "",
+    top_k: int = 5,
+    user: dict = Depends(require_user),
+):
+    """Keyword/semantic search over knowledge/*.md. Returns internal content — auth required."""
+    from app.services.knowledge import search_knowledge
+
+    query = (q or "").strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="Query parameter 'q' is required")
+    k = max(1, min(int(top_k or 5), 20))
+    return search_knowledge(query, top_k=k)
+
+
+@app.post(f"{settings.API_PREFIX}/knowledge/index")
+async def api_knowledge_index(
+    recreate: bool = False,
+    user: dict = Depends(require_user),
+):
+    """
+    Re-index knowledge/ into Qdrant. Keyword search is unaffected either way.
+    recreate=true drops the shared collection first, so it is audited.
+    """
+    from app.services.knowledge import index_knowledge_to_qdrant
+
+    result = await asyncio.to_thread(index_knowledge_to_qdrant, recreate)
+    await log_audit(
+        user["user_id"],
+        "knowledge_index",
+        {"recreate": recreate, "status": result.get("status"), "chunks": result.get("chunks")},
+    )
+    return result
 
 
 # ---------- Conversations ----------
@@ -590,8 +680,11 @@ async def internal_codex_chat(body: CodexChatRequest, request: Request):
 # ---------- HITL ----------
 
 @app.get(f"{settings.API_PREFIX}/actions/pending")
-async def get_pending_actions(user_id: str = "demo-user", status: str = "pending"):
-    actions = await list_pending_for_user(user_id, status=status)
+async def get_pending_actions(
+    status: str = "pending",
+    user: dict = Depends(require_user),
+):
+    actions = await list_pending_for_user(user["user_id"], status=status)
     return [
         {
             "id": a.id,
@@ -607,14 +700,14 @@ async def get_pending_actions(user_id: str = "demo-user", status: str = "pending
 
 
 @app.get(f"{settings.API_PREFIX}/actions/history")
-async def get_action_history(user_id: str = "demo-user"):
+async def get_action_history(user: dict = Depends(require_user)):
     """Return recent non-pending actions for the history view."""
     from app.models.database import PendingAction, AsyncSessionLocal
     from sqlalchemy import select
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(PendingAction)
-            .where(PendingAction.user_id == user_id, PendingAction.status != "pending")
+            .where(PendingAction.user_id == user["user_id"], PendingAction.status != "pending")
             .order_by(PendingAction.created_at.desc())
             .limit(30)
         )
@@ -634,17 +727,20 @@ async def get_action_history(user_id: str = "demo-user"):
 
 
 @app.post(f"{settings.API_PREFIX}/actions/{{action_id}}/resolve")
-async def resolve_pending_action(action_id: str, body: ActionResolveRequest):
-    action = await get_pending_action(action_id)
-    if action and action.payload is not None:
-        action.payload["user_id"] = body.user_id
-
+async def resolve_pending_action(
+    action_id: str,
+    body: ActionResolveRequest,
+    user: dict = Depends(require_user),
+):
+    uid = user["user_id"]
     result = await resolve_action(
         action_id=action_id,
         approve=body.approve,
         executor=execute_action if body.approve else None,
+        owner_user_id=uid,
     )
     if "error" in result:
-        raise HTTPException(status_code=400, detail=result["error"])
-    await log_audit(body.user_id, "action_resolve", {"action_id": action_id, "approve": body.approve, "status": result.get("status")})
+        status_code = 404 if result.get("code") == "not_found" else 400
+        raise HTTPException(status_code=status_code, detail=result["error"])
+    await log_audit(uid, "action_resolve", {"action_id": action_id, "approve": body.approve, "status": result.get("status")})
     return result

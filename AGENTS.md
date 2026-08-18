@@ -176,8 +176,11 @@ Minimum:
 
 ```bash
 curl -s http://localhost:8000/health
-curl -s http://localhost:8000/api/v1/knowledge/status
-curl -s "http://localhost:8000/api/v1/knowledge/search?q=follow-up"
+curl -s http://localhost:8000/api/v1/knowledge/status   # open: health probe, counts only
+
+# /knowledge/search returns internal content → needs a session
+curl -s -c /tmp/r.jar -X POST http://localhost:8000/api/v1/login/demo
+curl -s -b /tmp/r.jar "http://localhost:8000/api/v1/knowledge/search?q=follow-up"
 ```
 
 If you touched agent/LLM/tools:

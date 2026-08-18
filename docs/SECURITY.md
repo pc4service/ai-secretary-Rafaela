@@ -9,11 +9,15 @@
 | Αρχή | Υλοποίηση |
 |------|-----------|
 | Least privilege | Ξεχωριστά OAuth scopes login vs mail/calendar |
-| Human-in-the-loop | Κάθε write (email/event) → propose → approve |
+| Human-in-the-loop | Κάθε write (event / knowledge save) → propose → approve |
 | Dry-run default | `DRY_RUN=true` μέχρι ρητή ενεργοποίηση |
 | Encryption at rest | OAuth tokens με Fernet |
-| Auth session | HTTP-only cookie JWT · `REQUIRE_AUTH=true` |
-| Audit | `audit_logs` για chat, OAuth, resolve actions |
+| Auth session | HTTP-only cookie JWT · login υπάρχει · **`REQUIRE_AUTH` lock δεν είναι ακόμα στο config** |
+| Data isolation | `/actions/*` απαιτούν session· κάθε ενέργεια ελέγχεται ως προς τον ιδιοκτήτη (ξένο action → 404, χωρίς διαρροή ύπαρξης) |
+| Agent identity | Το LLM δεν επιλέγει `user_id` — δένεται server-side ανά run (`services/agent_context.py`) |
+| Mail read-only | 3 στρώματα: tools εκτός agent · scopes χωρίς `Mail.Send`/`gmail.send` · `BLOCKED_ACTION_TYPES` στον executor |
+| Prompt injection | Ανακτημένο περιεχόμενο (web, knowledge, emails) πλαισιώνεται ως δεδομένα· forged delimiters αφαιρούνται (`services/untrusted.py`) |
+| Audit | `audit_logs` για chat, OAuth, resolve actions, knowledge index |
 | Data minimization | Tools ζητούν μόνο ό,τι χρειάζεται |
 
 ---

@@ -13,7 +13,18 @@ import asyncio
 logger = structlog.get_logger()
 
 
-async def _get_google_service(user_id: str = "demo-user") -> GoogleWorkspaceService:
+def _normalize_user_id(user_id=None) -> str:
+    """
+    Resolve the acting user from the agent run context, ignoring whatever the
+    model passed. Call this in the tool body — not inside the coroutine given
+    to _run(), which executes in a worker thread without this context.
+    """
+    from app.services.agent_context import current_agent_user
+
+    return current_agent_user(user_id)
+
+
+async def _get_google_service(user_id: str) -> GoogleWorkspaceService:
     token_data = await get_oauth_token(user_id, "google")
     if not token_data:
         raise ValueError("Google Workspace is not connected. Please connect it in Settings.")
@@ -36,8 +47,10 @@ def _run(coro):
 def google_list_emails(max_results: int = 5, query: str = "in:inbox", user_id: str = "demo-user") -> str:
     """List recent emails from the user's Gmail inbox."""
     try:
+        uid = _normalize_user_id(user_id)
+
         async def _inner():
-            service = await _get_google_service(user_id)
+            service = await _get_google_service(uid)
             messages = service.list_messages(max_results=max_results, query=query)
             if not messages:
                 return "No emails found."
@@ -47,7 +60,9 @@ def google_list_emails(max_results: int = 5, query: str = "in:inbox", user_id: s
                     f"- [{m.get('date', '')[:25]}] {m.get('subject', '(no subject)')} "
                     f"from {m.get('from', 'unknown')} | {m.get('snippet', '')[:80]}"
                 )
-            return "Recent Gmail messages:\n" + "\n".join(lines)
+            from app.services.untrusted import wrap_untrusted
+
+            return "Recent Gmail messages:\n" + wrap_untrusted("\n".join(lines))
         return _run(_inner())
     except Exception as e:
         return f"Error listing Gmail: {str(e)}"
@@ -57,8 +72,10 @@ def google_list_emails(max_results: int = 5, query: str = "in:inbox", user_id: s
 def google_list_calendar(days_ahead: int = 7, user_id: str = "demo-user") -> str:
     """List upcoming events from Google Calendar."""
     try:
+        uid = _normalize_user_id(user_id)
+
         async def _inner():
-            service = await _get_google_service(user_id)
+            service = await _get_google_service(uid)
             events = service.list_events(days_ahead=days_ahead)
             if not events:
                 return "No upcoming Google Calendar events."
@@ -80,11 +97,13 @@ def google_propose_send_email(to: str, subject: str, body: str, user_id: str = "
     Creates a pending action that requires user approval (human-in-the-loop).
     """
     try:
+        uid = _normalize_user_id(user_id)
+
         async def _inner():
-            await _get_google_service(user_id)
+            await _get_google_service(uid)
             desc = f"Αποστολή Gmail σε {to}\nΘέμα: {subject}\n\n{body[:300]}"
             action = await create_pending_action(
-                user_id=user_id,
+                user_id=uid,
                 action_type="google_send_email",
                 payload={"to": to, "subject": subject, "body": body},
                 description=desc,
@@ -114,8 +133,10 @@ def google_propose_create_event(
     Creates a pending action that requires user approval.
     """
     try:
+        uid = _normalize_user_id(user_id)
+
         async def _inner():
-            await _get_google_service(user_id)
+            await _get_google_service(uid)
             desc = (
                 f"Δημιουργία Google event: {summary}\n"
                 f"Από: {start}  Έως: {end}\n"
@@ -132,7 +153,7 @@ def google_propose_create_event(
                 "attendees": attendees,
             }
             action = await create_pending_action(
-                user_id=user_id,
+                user_id=uid,
                 action_type="google_create_event",
                 payload=payload,
                 description=desc,
