@@ -320,12 +320,12 @@ server, όχι το introspection.
 | # | Priority | Εύρημα | Κατάσταση |
 |---|----------|--------|-----------|
 | P0-10 | **P0** | `/auth/{microsoft,google}/callback`: το `state` χρησιμοποιείται **απευθείας ως user_id** χωρίς καμία επαλήθευση. Μη-αυθεντικοποιημένος καλών γράφει OAuth tokens σε λογαριασμό της επιλογής του | ✅ done |
-| P1-5 | P1 | `/api/v1/system-prompt` χωρίς auth — εκθέτει πλήρη πολιτική agent, λίστα tools και τους κανόνες anti-injection | ⬜ open |
+| P1-5 | P1 | `/api/v1/system-prompt` χωρίς auth — εκθέτει πλήρη πολιτική agent, λίστα tools και τους κανόνες anti-injection | ✅ done |
 | P1-6 | P1 | Hardcoded `http://localhost:3000` redirect στα MS/Google callbacks ενώ αλλού χρησιμοποιείται `settings.FRONTEND_URL` — σπάει το connect flow σε deploy | ✅ done |
 | P1-7 | P1 | `/internal/codex/v1/chat/completions` εκτεθειμένο στη δημόσια πόρτα· bearer relay που θα έπρεπε να είναι internal-only | ⬜ open |
 | P2-7 | P2 | `_oauth_states` και `_pending` in-memory — με >1 worker το login/connect σπάει (state σε worker A, callback σε worker B)· χάνονται σε restart | ✅ done |
-| P2-8 | P2 | `/docs`, `/redoc`, `/openapi.json` πάντα ενεργά — σε production δημοσιεύουν όλη την επιφάνεια API | ⬜ open |
-| P2-9 | P2 | CORS: `http://localhost:3000` προστίθεται πάντα με `allow_credentials=True`, και σε production | ⬜ open |
+| P2-8 | P2 | `/docs`, `/redoc`, `/openapi.json` πάντα ενεργά — σε production δημοσιεύουν όλη την επιφάνεια API | ✅ done |
+| P2-9 | P2 | CORS: `http://localhost:3000` προστίθεται πάντα με `allow_credentials=True`, και σε production | ✅ done |
 
 ### Λεπτομέρεια για το P0-10
 
@@ -386,7 +386,7 @@ await save_oauth_token(user_id=state, provider="microsoft", ...)
 - **Redirect σε σελίδα σφάλματος αντί για 400**: ο νόμιμος χρήστης με ληγμένο state
   βλέπει κάτι χρήσιμο, ενώ η απόρριψη καταγράφεται ως `oauth_state_rejected`.
 - **Παραμένει in-memory** όπως το login store — το P2-7 (Redis) ισχύει και εδώ και
-  τεκμηριώνεται στο docstring.
+  τεκμηριώνεται στο docstring. *(Διορθώθηκε στη Φάση 8.)*
 
 ### Επαλήθευση
 
@@ -448,3 +448,55 @@ replay rejected (good)
 | Εγγραφές όντως στο Redis με TTL | `keys=2`, `ttl=600` |
 | Login callback με πλαστό state | 307 → `?error=invalid_state` |
 | `/health`, demo login, `/settings`, `/conversations` | 200 |
+
+---
+
+## Φάση 9 — 2026-08-19 · P1-5 + P2-8 + P2-9 (σφίξιμο δημόσιας επιφάνειας)
+
+### Τι άλλαξε
+
+| Αρχείο | Αλλαγή |
+|--------|--------|
+| `main.py` | `/system-prompt` → `require_user`· `docs_urls(environment)` κλείνει docs/redoc/openapi σε production· `_cors_origins()` πετάει loopback origins σε production |
+| `.env.example` | Προστέθηκε `CORS_ORIGINS` με εξήγηση |
+
+### Σχεδιαστικές αποφάσεις
+
+- **Το `CORS_ORIGINS` default περιέχει localhost**, οπότε δεν αρκεί να μην
+  προσθέτουμε localhost — σε production φιλτράρονται **όλα** τα loopback origins,
+  ακόμη κι αν είναι ρητά ρυθμισμένα. Καταγράφεται `cors_loopback_origins_dropped`.
+- **Το `FRONTEND_URL` μπαίνει αυτόματα** στα allowed origins, ώστε ένα σωστά
+  ρυθμισμένο deploy να δουλεύει χωρίς διπλή ρύθμιση.
+- **Fail closed**: αν σε production δεν μείνει κανένα origin, το CORS μπλοκάρει
+  τα πάντα και λογκάρεται `cors_no_origins_configured` — αντί για σιωπηλό
+  permissive fallback.
+- **`docs_urls()` ως καθαρή συνάρτηση** αντί για inline συνθήκη: η πρώτη μου
+  εκδοχή το έλεγχε με `importlib.reload` του `app.main`, που αντικαθιστούσε
+  module objects τα οποία κρατούσαν άλλα test modules. Δουλεύει, αλλά είναι
+  εύθραυστο — προτιμήθηκε testable λογική χωρίς reload.
+
+### Επαλήθευση
+
+```
+105 passed  (από 94· νέο tests/test_public_surface.py)
+```
+
+Ζωντανό instance με `ENVIRONMENT=production`, `FRONTEND_URL=https://rafaela.example.com`:
+
+| Έλεγχος | Production | Dev (trial) |
+|---------|-----------|-------------|
+| `/docs`, `/redoc`, `/openapi.json` | **404** | 200 |
+| `/system-prompt` anonymous | **401** | 401 |
+| `/system-prompt` με session | — | 200 |
+| `/health` | 200 | 200 |
+| demo login | **403** (προϋπάρχον guard) | 200 |
+| CORS preflight από `http://localhost:3000` | **κανένα allow-origin** | επιτρέπεται |
+| CORS preflight από `https://rafaela.example.com` | `access-control-allow-origin` OK | — |
+
+Στα logs production: `cors_loopback_origins_dropped origins=['http://localhost:3000', 'http://localhost:8000']`.
+
+### Σημείωση για επόμενα audits
+
+Με το P2-8, το `/openapi.json` **δεν** είναι διαθέσιμο σε production. Ο κανόνας
+της Φάσης 6 (πηγή αλήθειας το OpenAPI αντί για introspection) ισχύει, αλλά ο
+έλεγχος πρέπει να τρέχει σε dev/trial instance.

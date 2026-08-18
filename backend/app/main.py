@@ -62,11 +62,24 @@ async def lifespan(app: FastAPI):
     yield
 
 
+def docs_urls(environment: str) -> Dict[str, Optional[str]]:
+    """
+    Where the interactive docs live, or None to switch them off.
+
+    They publish the whole API surface including every parameter name, which is
+    a head start for anyone probing it. Useful everywhere except production.
+    """
+    if environment == "production":
+        return {"docs_url": None, "redoc_url": None, "openapi_url": None}
+    return {"docs_url": "/docs", "redoc_url": "/redoc", "openapi_url": "/openapi.json"}
+
+
 app = FastAPI(
     title="Rafaela – AI Secretary",
     version=settings.APP_VERSION,
     description="GDPR-compliant AI Secretary Agent powered by Haystack",
     lifespan=lifespan,
+    **docs_urls(settings.ENVIRONMENT),
 )
 
 from app.api_auth import (
@@ -78,9 +91,44 @@ from app.api_auth import (
 
 app.include_router(login_router)
 
+def _cors_origins() -> List[str]:
+    """
+    Browser origins allowed to call the API.
+
+    allow_credentials=True means every origin listed here can drive the API
+    with the user's session cookie, so loopback origins are only trusted
+    outside production — including the ones baked into the CORS_ORIGINS
+    default, which a deployment can easily forget to override.
+    """
+    from urllib.parse import urlparse
+
+    candidates = list(settings.CORS_ORIGINS)
+    if settings.FRONTEND_URL:
+        candidates.append(settings.FRONTEND_URL)
+
+    if settings.ENVIRONMENT == "production":
+        loopback = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
+        kept, dropped = [], []
+        for origin in candidates:
+            host = (urlparse(origin).hostname or "").lower()
+            (dropped if host in loopback else kept).append(origin)
+        if dropped:
+            logger.warning("cors_loopback_origins_dropped", origins=dropped)
+        candidates = kept
+        if not candidates:
+            logger.error("cors_no_origins_configured", hint="set FRONTEND_URL / CORS_ORIGINS")
+
+    seen, origins = set(), []
+    for origin in candidates:
+        if origin and origin not in seen:
+            seen.add(origin)
+            origins.append(origin)
+    return origins
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS + ["http://localhost:3000"],
+    allow_origins=_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -393,7 +441,12 @@ async def chat_stream(request: ChatRequest, uid: str = Depends(resolve_user_id))
 
 
 @app.get(f"{settings.API_PREFIX}/system-prompt")
-async def get_system_prompt():
+async def get_system_prompt(user: dict = Depends(require_user)):
+    """
+    The agent's operating policy: tool inventory, HITL rules and the
+    untrusted-content defences. Handing that to an anonymous caller is a map
+    for writing prompt injections against it, so it needs a session.
+    """
     return {"system_prompt": SECRETARY_SYSTEM_PROMPT}
 
 
