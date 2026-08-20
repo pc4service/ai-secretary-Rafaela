@@ -16,17 +16,19 @@ logger = structlog.get_logger()
 
 
 def _normalize_user_id(user_id: Optional[str] = None) -> str:
-    """Models often pass 'me'/'current'; map those to the app user."""
-    uid = (user_id or "").strip()
-    if uid.lower() in ("", "me", "current", "user", "current_user", "self"):
-        return "demo-user"
-    return uid
+    """
+    Resolve the acting user from the agent run context, ignoring whatever the
+    model passed. Call this in the tool body — not inside the coroutine given
+    to _run(), which executes in a worker thread without this context.
+    """
+    from app.services.agent_context import current_agent_user
+
+    return current_agent_user(user_id)
 
 
-async def _get_ms_service(user_id: str = "demo-user") -> Microsoft365Service:
+async def _get_ms_service(user_id: str) -> Microsoft365Service:
     # Silent refresh: returns a valid access token without an OAuth login;
     # raises ReconnectRequired only if the refresh token is gone/revoked.
-    user_id = _normalize_user_id(user_id)
     try:
         token_data = await get_fresh_microsoft_tokens(user_id)
     except ReconnectRequired as e:
@@ -54,8 +56,10 @@ def _run(coro):
 def ms_list_emails(top: int = 5, user_id: str = "demo-user") -> str:
     """List the most recent emails from the user's Microsoft 365 (Outlook) inbox."""
     try:
+        uid = _normalize_user_id(user_id)
+
         async def _inner():
-            service = await _get_ms_service(user_id)
+            service = await _get_ms_service(uid)
             messages = await service.list_messages(top=top)
             if not messages:
                 return "No emails found."
@@ -66,7 +70,9 @@ def ms_list_emails(top: int = 5, user_id: str = "demo-user") -> str:
                     f"- [{m.get('receivedDateTime', '')[:16]}] {m.get('subject', '(no subject)')} "
                     f"from {sender} | preview: {m.get('bodyPreview', '')[:80]}"
                 )
-            return "Recent Outlook emails:\n" + "\n".join(lines)
+            from app.services.untrusted import wrap_untrusted
+
+            return "Recent Outlook emails:\n" + wrap_untrusted("\n".join(lines))
         return _run(_inner())
     except Exception as e:
         return f"Error listing Microsoft emails: {str(e)}"
@@ -76,8 +82,10 @@ def ms_list_emails(top: int = 5, user_id: str = "demo-user") -> str:
 def ms_list_calendar(days_ahead: int = 7, user_id: str = "demo-user") -> str:
     """List upcoming calendar events from Microsoft 365 Outlook Calendar."""
     try:
+        uid = _normalize_user_id(user_id)
+
         async def _inner():
-            service = await _get_ms_service(user_id)
+            service = await _get_ms_service(uid)
             events = await service.list_events(days_ahead=days_ahead)
             if not events:
                 return "No upcoming events found."
@@ -109,11 +117,13 @@ def ms_propose_send_email(
     Do NOT use this for reading emails.
     """
     try:
+        uid = _normalize_user_id(user_id)
+
         async def _inner():
-            await _get_ms_service(user_id)
+            await _get_ms_service(uid)
             desc = f"Αποστολή email σε {to}\nΘέμα: {subject}\n\n{body[:300]}"
             action = await create_pending_action(
-                user_id=user_id,
+                user_id=uid,
                 action_type="ms_send_email",
                 payload={"to": to, "subject": subject, "body": body},
                 description=desc,
@@ -145,8 +155,10 @@ def ms_propose_create_event(
     attendees is a comma-separated list of emails.
     """
     try:
+        uid = _normalize_user_id(user_id)
+
         async def _inner():
-            await _get_ms_service(user_id)
+            await _get_ms_service(uid)
             desc = (
                 f"Δημιουργία ραντεβού: {subject}\n"
                 f"Από: {start}  Έως: {end}\n"
@@ -163,7 +175,7 @@ def ms_propose_create_event(
                 "attendees": attendees,
             }
             action = await create_pending_action(
-                user_id=user_id,
+                user_id=uid,
                 action_type="ms_create_event",
                 payload=payload,
                 description=desc,

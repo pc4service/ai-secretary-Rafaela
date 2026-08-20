@@ -9,11 +9,17 @@
 | Αρχή | Υλοποίηση |
 |------|-----------|
 | Least privilege | Ξεχωριστά OAuth scopes login vs mail/calendar |
-| Human-in-the-loop | Κάθε write (email/event) → propose → approve |
+| Human-in-the-loop | Κάθε write (event / knowledge save) → propose → approve |
 | Dry-run default | `DRY_RUN=true` μέχρι ρητή ενεργοποίηση |
 | Encryption at rest | OAuth tokens με Fernet |
-| Auth session | HTTP-only cookie JWT · `REQUIRE_AUTH=true` |
-| Audit | `audit_logs` για chat, OAuth, resolve actions |
+| Auth session | HTTP-only cookie JWT · `REQUIRE_AUTH=true` κόβει το anonymous demo fallback· **σε `ENVIRONMENT=production` επιβάλλεται πάντα** |
+| Data isolation | `/actions/*` και `/conversations/*` απαιτούν session· κάθε ενέργεια/συνομιλία ελέγχεται ως προς τον ιδιοκτήτη (ξένο id → 404, χωρίς διαρροή ύπαρξης) |
+| Identity από session μόνο | Κανένα endpoint δεν δέχεται `user_id` από query/body — ούτε το chat, ούτε το OAuth `state` |
+| Agent identity | Το LLM δεν επιλέγει `user_id` — δένεται server-side ανά run (`services/agent_context.py`) |
+| Mail read-only | 3 στρώματα: tools εκτός agent · scopes χωρίς `Mail.Send`/`gmail.send` · `BLOCKED_ACTION_TYPES` στον executor |
+| No token relay | ChatGPT OAuth καλείται in-process — **δεν** υπάρχει δημόσιο `/internal/codex` HTTP shim |
+| Prompt injection | Ανακτημένο περιεχόμενο (web, knowledge, emails) πλαισιώνεται ως δεδομένα· forged delimiters αφαιρούνται (`services/untrusted.py`) |
+| Audit | `audit_logs` για chat, OAuth, resolve actions, knowledge index |
 | Data minimization | Tools ζητούν μόνο ό,τι χρειάζεται |
 
 ---

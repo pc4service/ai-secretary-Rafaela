@@ -47,7 +47,7 @@ GOOGLE_REDIRECT_URI=https://api.rafaela.example.com/api/v1/auth/google/callback
 GOOGLE_LOGIN_REDIRECT_URI=https://api.rafaela.example.com/api/v1/login/google/callback
 MS_LOGIN_REDIRECT_URI=https://api.rafaela.example.com/api/v1/login/microsoft/callback
 COOKIE_SECURE=true
-QDRANT_URL=http://qdrant:6333
+# QDRANT_URL=http://qdrant:6333   # μόνο όταν προστεθεί qdrant στο compose (Phase 1B)
 ```
 
 ### 3. Start
@@ -55,9 +55,10 @@ QDRANT_URL=http://qdrant:6333
 ```bash
 docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
 curl -sf http://127.0.0.1:8000/health
+curl -sf http://127.0.0.1:8000/api/v1/knowledge/status
 ```
 
-> Αν το `docker-compose.prod.yml` δεν περιλαμβάνει ακόμα `qdrant`, πρόσθεσέ το όπως στο dev compose ή χρησιμοποίησε keyword fallback (δουλεύει χωρίς Qdrant).
+> **Knowledge σήμερα:** keyword search από `knowledge/*.md`. Το `docker-compose.prod.yml` **δεν** έχει ακόμα υπηρεσία Qdrant· μην βασίζεσαι σε semantic index μέχρι να υλοποιηθεί το Phase 1B.
 
 ### 4. Cloudflare Tunnel
 
@@ -123,8 +124,8 @@ sudo ufw enable
 | 1 | `/health` → ok, `dry_run: true` |
 | 2 | Login Demo ή OAuth |
 | 3 | Chat απαντά |
-| 4 | Knowledge: «πρότυπο follow-up» |
-| 5 | HITL propose email → Έγκριση → dry-run μήνυμα |
+| 4 | Knowledge: `GET /api/v1/knowledge/search?q=follow-up` ή chat «πρότυπο follow-up» |
+| 5 | HITL propose **calendar event** → Έγκριση → dry-run (το send-email δεν είναι ενεργό) |
 | 6 | Settings: σύνδεση Google/MS (αν OAuth έτοιμο) |
 | 7 | Backup Postgres (cron / snapshot) |
 | 8 | `DRY_RUN=false` **μόνο** μετά από γραπτή έγκριση pilot |

@@ -18,6 +18,7 @@ from app.services.auth import (
     exchange_microsoft_login_code,
     new_oauth_state,
 )
+from app.services.state_store import StateStore
 from app.services.token_store import ensure_user
 from app.models.database import AsyncSessionLocal
 from app.services.conversation import log_audit
@@ -25,8 +26,8 @@ from app.services.conversation import log_audit
 logger = structlog.get_logger()
 router = APIRouter(prefix=f"{settings.API_PREFIX}/login", tags=["login"])
 
-# Simple in-memory state store for OAuth CSRF (use Redis in production)
-_oauth_states: dict = {}
+# OAuth CSRF state, shared across workers via Redis when available.
+_login_states = StateStore("login", 600)
 
 
 def _set_session_cookie(response: Response, token: str) -> None:
@@ -74,6 +75,28 @@ async def require_user(user: Optional[dict] = Depends(get_current_user)) -> dict
     return user
 
 
+DEFAULT_USER_ID = "demo-user"
+
+
+async def resolve_user_id(user: Optional[dict] = Depends(get_current_user)) -> str:
+    """
+    The user a request acts as, taken from the session only.
+
+    A client-supplied user_id is never consulted — that was how callers used to
+    read other people's conversations. Without a session this falls back to the
+    demo user for local development, unless REQUIRE_AUTH is set or we are in
+    production, where it is a 401.
+
+    Use this for user-scoped reads. Endpoints that change external state should
+    depend on require_user instead, so they always need a real session.
+    """
+    if user:
+        return user["user_id"]
+    if settings.auth_required:
+        raise HTTPException(status_code=401, detail="Authentication required. Please sign in.")
+    return DEFAULT_USER_ID
+
+
 @router.get("/providers")
 async def list_login_providers():
     """Which identity providers are configured."""
@@ -89,7 +112,7 @@ async def login_google_start():
     if not settings.GOOGLE_CLIENT_ID:
         raise HTTPException(400, "Google login not configured")
     state = new_oauth_state()
-    _oauth_states[state] = "google"
+    _login_states.put(state, {"provider": "google"})
     url = get_google_login_url(state, settings.GOOGLE_LOGIN_REDIRECT_URI)
     return {"auth_url": url}
 
@@ -98,9 +121,9 @@ async def login_google_start():
 async def login_google_callback(code: str = "", state: str = "", error: str = ""):
     if error:
         return RedirectResponse(f"{settings.FRONTEND_URL}/login?error={error}")
-    if not code or state not in _oauth_states:
+    record = _login_states.pop(state) if code else None
+    if not record or record.get("provider") != "google":
         return RedirectResponse(f"{settings.FRONTEND_URL}/login?error=invalid_state")
-    _oauth_states.pop(state, None)
     try:
         info = await exchange_google_login_code(code, settings.GOOGLE_LOGIN_REDIRECT_URI)
         async with AsyncSessionLocal() as session:
@@ -122,7 +145,7 @@ async def login_microsoft_start():
     if not settings.MS_CLIENT_ID:
         raise HTTPException(400, "Microsoft login not configured")
     state = new_oauth_state()
-    _oauth_states[state] = "microsoft"
+    _login_states.put(state, {"provider": "microsoft"})
     url = get_microsoft_login_url(state, settings.MS_LOGIN_REDIRECT_URI)
     return {"auth_url": url}
 
@@ -131,9 +154,9 @@ async def login_microsoft_start():
 async def login_microsoft_callback(code: str = "", state: str = "", error: str = ""):
     if error:
         return RedirectResponse(f"{settings.FRONTEND_URL}/login?error={error}")
-    if not code or state not in _oauth_states:
+    record = _login_states.pop(state) if code else None
+    if not record or record.get("provider") != "microsoft":
         return RedirectResponse(f"{settings.FRONTEND_URL}/login?error=invalid_state")
-    _oauth_states.pop(state, None)
     try:
         info = await exchange_microsoft_login_code(code, settings.MS_LOGIN_REDIRECT_URI)
         async with AsyncSessionLocal() as session:

@@ -60,10 +60,15 @@ async def resolve_action(
     action_id: str,
     approve: bool,
     executor=None,
+    owner_user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Approve or reject a pending action.
     If approve=True and executor is provided, execute the real action.
+
+    owner_user_id: when given, the action must belong to that user. The check
+    runs in the same transaction as the resolve, and the executor is always
+    called with the action's stored owner — never with a caller-supplied id.
     """
     async with AsyncSessionLocal() as session:
         result = await session.execute(
@@ -71,9 +76,16 @@ async def resolve_action(
         )
         action = result.scalar_one_or_none()
         if not action:
-            return {"error": "Action not found"}
+            return {"error": "Action not found", "code": "not_found"}
+        if owner_user_id is not None and action.user_id != owner_user_id:
+            logger.warning(
+                "pending_action_owner_mismatch",
+                action_id=action_id,
+                caller=owner_user_id,
+            )
+            return {"error": "Action not found", "code": "not_found"}
         if action.status != "pending":
-            return {"error": f"Action already {action.status}"}
+            return {"error": f"Action already {action.status}", "code": "conflict"}
 
         if not approve:
             action.status = "rejected"
@@ -89,7 +101,9 @@ async def resolve_action(
         result_text = "Approved"
         if executor:
             try:
-                result_text = await executor(action.action_type, action.payload)
+                result_text = await executor(
+                    action.action_type, action.payload, action.user_id
+                )
                 action.status = "executed"
                 action.result = str(result_text)
             except Exception as e:

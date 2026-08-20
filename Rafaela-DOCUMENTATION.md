@@ -1,26 +1,31 @@
 # Rafaela – AI Secretary Agent
 
-**Version:** 1.1 · **Updated:** 14 August 2026
+**Version:** 1.2 · **Updated:** 16 August 2026
 
 GDPR-aware AI executive secretary (Haystack + FastAPI + Next.js).
 
 ## Quick start
 
 ```bash
-cp .env.example .env    # set OPENAI_API_KEY
+cd C:\DEVELOP\ai-secretary
+cp .env.example .env
 docker compose up --build
 # UI http://localhost:3000 · API http://localhost:8000/docs
 ```
 
-### Phase 3 (v1.1)
+### Τι υπάρχει τώρα (αληθινό tree)
 
-| Feature | Endpoint / UI |
-|---------|----------------|
-| Streaming chat | `POST /api/v1/chat/stream` (SSE) |
-| Onboarding | Modal on first visit (`OnboardingWizard`) |
-| Conversations | Sidebar list / new / delete |
+| Feature | Endpoint / UI | Σημείωση |
+|---------|----------------|----------|
+| Streaming chat | `POST /api/v1/chat/stream` | SSE |
+| Onboarding + conversations | `OnboardingWizard`, sidebar | |
+| Login | Demo / Google / MS | Cookie session |
+| MS365 + Google | Settings · `/auth/microsoft|google` | Mail **read-only** |
+| ChatGPT OAuth | Settings · `/auth/openai` | Callback `localhost:1455` |
+| Knowledge keyword | `GET /api/v1/knowledge/search` + tool | Όχι ακόμα Qdrant |
+| HITL calendar | propose → approve | Email send **δεν** είναι registered |
 
-Classic non-stream chat: `POST /api/v1/chat` still available.
+Classic chat: `POST /api/v1/chat` still available.
 
 ---
 
@@ -99,7 +104,7 @@ Classic non-stream chat: `POST /api/v1/chat` still available.
 ## 4. Δομή Project
 
 ```
-ai-secretary-agent/
+ai-secretary/
 ├── backend/
 │   ├── app/
 │   │   ├── agent/secretary_agent.py   # Haystack Agent + Rafaela system prompt
@@ -110,19 +115,28 @@ ai-secretary-agent/
 │   │   ├── services/
 │   │   │   ├── microsoft.py           # MS Graph Mail + Calendar
 │   │   │   ├── google.py              # Gmail + Google Calendar
-│   │   │   ├── token_store.py         # Encrypted OAuth persistence
-│   │   │   ├── pending_actions.py     # HITL workflow
-│   │   │   ├── conversation.py        # Chat memory
-│   │   │   └── gdpr.py                # GDPR helpers
+│   │   │   ├── openai_oauth.py        # ChatGPT / Codex OAuth
+│   │   │   ├── llm_router.py          # multi-provider failover
+│   │   │   ├── knowledge.py           # keyword RAG (Qdrant stub)
+│   │   │   ├── token_store.py
+│   │   │   ├── pending_actions.py
+│   │   │   ├── conversation.py
+│   │   │   └── gdpr.py
 │   │   ├── tools/
-│   │   │   ├── ms365_tools.py         # list + propose_* tools
-│   │   │   └── google_tools.py
-│   │   └── main.py                    # FastAPI routes + rate limit
+│   │   │   ├── ms365_tools.py
+│   │   │   ├── google_tools.py
+│   │   │   └── knowledge_tools.py     # search_knowledge
+│   │   ├── api_auth.py                # login session
+│   │   └── main.py
 │   └── requirements.txt
+├── knowledge/                         # εταιρικά md πρότυπα
 ├── frontend/
-│   ├── src/app/page.tsx               # 3 tabs: Chat | Ενέργειες | Ρυθμίσεις
+│   ├── src/app/page.tsx
+│   ├── src/app/login/page.tsx
 │   ├── src/components/
 │   │   ├── Chat.tsx
+│   │   ├── ConversationSidebar.tsx
+│   │   ├── OnboardingWizard.tsx
 │   │   ├── PendingActions.tsx
 │   │   └── Settings.tsx
 │   └── package.json
@@ -145,7 +159,8 @@ ai-secretary-agent/
 ### Agent (Rafaela)
 - Bilingual (Ελληνικά πρώτα αν ο χρήστης γράφει ελληνικά)
 - Calendar list / propose create event
-- Email list / propose send
+- Email **list only** (send tools not registered)
+- Knowledge templates (`search_knowledge`, keyword)
 - Web research (Firecrawl)
 - GDPR export / delete tools
 - Πάντα propose → approve για write actions
@@ -174,8 +189,13 @@ ai-secretary-agent/
 |--------|------|-----------|
 | GET | `/health` | Health check |
 | POST | `/api/v1/chat` | Chat με Rafaela |
+| POST | `/api/v1/chat/stream` | SSE streaming chat |
 | GET | `/api/v1/system-prompt` | Τρέχον system prompt |
+| GET | `/api/v1/knowledge/status` | Knowledge dir / chunks |
+| GET | `/api/v1/knowledge/search?q=` | Keyword/semantic search · **auth** |
+| POST | `/api/v1/knowledge/index` | Re-index στο Qdrant · **auth** |
 | GET | `/api/v1/settings` | Κατάσταση συνδέσεων |
+| GET | `/api/v1/auth/openai/login` | ChatGPT OAuth URL |
 | GET | `/api/v1/auth/microsoft/login` | OAuth URL Microsoft |
 | GET | `/api/v1/auth/microsoft/callback` | OAuth callback |
 | POST | `/api/v1/auth/microsoft/disconnect` | Αποσύνδεση |
@@ -201,7 +221,7 @@ ai-secretary-agent/
 ### Βήμα 1 – Clone / είσοδος στο project
 
 ```bash
-cd ai-secretary-agent
+cd C:\DEVELOP\ai-secretary
 ```
 
 ### Βήμα 2 – Environment
@@ -262,11 +282,12 @@ make up
 ### Βήμα 7 – Δοκιμή HITL
 
 ```
-Στείλε ένα δοκιμαστικό email στον test@example.com με θέμα "Γεια από Rafaela"
+Φτιάξε follow-up email μετά από meeting (από τα πρότυπα).
+Πρότεινε ένα event αύριο στις 10:00.
 ```
 
-Θα εμφανιστούν κουμπιά **Έγκριση** / **Απόρριψη**.  
-Με `DRY_RUN=true` δεν στέλνεται πραγματικό email.
+Για calendar write εμφανίζονται **Έγκριση** / **Απόρριψη**.  
+Το mail είναι read-only: η Rafaela δίνει draft, δεν στέλνει.
 
 ---
 
@@ -309,26 +330,27 @@ make shell     # shell στο backend container
 
 ---
 
-## 11. Επόμενα Βήματα (προαιρετικά)
+## 11. Επόμενα Βήματα
 
-1. Sidebar με λίστα παλιών συνομιλιών
-2. Πραγματικό GDPR JSON export download
-3. Multi-user auth (login)
-4. Streaming responses στο chat
-5. Deploy σε cloud (EU) με managed Postgres
+1. ~~Semantic RAG (Qdrant)~~ ✅  
+2. ~~`REQUIRE_AUTH` + isolation~~ ✅ (βλ. `docs/AUDIT.md`)  
+3. ~~Unit/guard tests + CI~~ ✅ (`make test`)  
+4. Merge hardening → `master` + pilot deploy  
+5. Πραγματικό GDPR JSON export στο UI  
+6. Multi-tenant / billing / per-tenant knowledge **μετά** τον πρώτο pilot  
+
+
+Graphify / ECC / UI-UX Pro Max: skills του coding assistant — δεν μπαίνουν ως runtime της Rafaela.
 
 ---
 
-## 12. Σύνοψη Αρχείων για Download
+## 12. Αρχεία τεκμηρίωσης
 
-Το πλήρες project βρίσκεται στο:
-
-**`/home/workdir/artifacts/ai-secretary-agent/`**
-
-Κύρια αρχεία τεκμηρίωσης:
 - `README.md` – γρήγορη εκκίνηση
-- `docs/DOCUMENTATION.md` – αυτό το αναλυτικό έγγραφο
-- `docs/AGENT_SYSTEM_PROMPT.md` – system prompt Rafaela
+- `docs/DOCUMENTATION.md` – αυτό το έγγραφο
+- `docs/ROADMAP.md` – φάσεις + αληθινό status
+- `docs/AGENT_SYSTEM_PROMPT.md` – system prompt (συγχρονισμένο με read-only mail)
+- `docs/DEPLOY.md`, `SECURITY.md`, `NGINX.md`, `PRODUCTION.md`
 - `.env.example` – μεταβλητές περιβάλλοντος
 
 ---

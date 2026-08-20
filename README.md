@@ -5,22 +5,20 @@ Professional AI Executive Secretary powered by **Haystack**, **Firecrawl**, Micr
 ## Features
 
 - **Rafaela** – bilingual (Greek/English) AI secretary
-- **Microsoft 365** & **Google Workspace** (OAuth + Mail + Calendar)
-- **Human-in-the-loop** – every write action requires explicit approval
-- **Conversation memory** – chat history persisted in PostgreSQL
-- **Encrypted OAuth tokens** (Fernet)
-- **Audit log** for GDPR accountability
-- **Rate limiting** (60 req/min per IP)
-- **Dry-run / Trial mode** by default
-- Modern Next.js UI: Chat · Ενέργειες · Ρυθμίσεις
+- **Microsoft 365** & **Google Workspace** (OAuth · Mail **read-only** · Calendar HITL)
+- **ChatGPT OAuth** – Sign in with ChatGPT from Settings (in-process Codex path, no public relay)
+- **Knowledge RAG** – templates in `knowledge/` (keyword always · semantic/hybrid with Qdrant)
+- **Human-in-the-loop** – calendar / knowledge writes require approval
+- **Conversation memory** – PostgreSQL + sidebar
+- **Streaming chat** (SSE) + onboarding wizard
+- Encrypted OAuth tokens, audit log, shared rate limit, `DRY_RUN=true` by default
+- **`REQUIRE_AUTH`** – session isolation on actions/conversations (always on in production)
 
 ## Quick Start
 
 ```bash
-cd ai-secretary-agent
+cd C:\DEVELOP\ai-secretary
 cp .env.example .env
-# Set at least OPENAI_API_KEY=sk-...
-
 docker compose up --build
 ```
 
@@ -28,13 +26,13 @@ docker compose up --build
 |----------|----------------------------|
 | Frontend | http://localhost:3000      |
 | Backend  | http://localhost:8000      |
-| API Docs | http://localhost:8000/docs |
+| API Docs | http://localhost:8000/docs (not in production) |
 
 ## UI Tabs
 
-1. **Chat** – talk to Rafaela; approve/reject inline when she proposes actions
-2. **Ενέργειες** – full list of pending actions + history
-3. **Ρυθμίσεις** – connect/disconnect Microsoft & Google, GDPR status
+1. **Chat** – talk to Rafaela; approve/reject calendar proposals
+2. **Ενέργειες** – pending actions + history
+3. **Ρυθμίσεις** – Microsoft, Google, ChatGPT OAuth, GDPR flags
 
 ## Architecture highlights
 
@@ -42,14 +40,24 @@ docker compose up --build
 - Conversations + messages in DB for memory
 - `pending_actions` table for HITL workflow
 - `audit_logs` for every significant event
-- Simple rate limiter middleware
+- `knowledge/` markdown + hybrid search (Qdrant optional)
+- LLM failover (`llm_router.py`)
+- Hardening log: `docs/AUDIT.md`
+
+## Checks
+
+```bash
+make health
+make test
+make knowledge
+```
 
 ## OAuth setup
 
-See previous README section / Azure Portal + Google Cloud Console.
-Redirect URIs:
+Redirect URIs (local):
 - `http://localhost:8000/api/v1/auth/microsoft/callback`
 - `http://localhost:8000/api/v1/auth/google/callback`
+- ChatGPT / Codex: `http://localhost:1455/auth/callback` (published in compose)
 
 ## GDPR
 
@@ -58,6 +66,13 @@ Redirect URIs:
 - Data export / delete tools available to the agent
 - Configurable retention
 - Audit trail
+
+## Docs
+
+- `docs/ROADMAP.md` — product roadmap
+- `docs/AUDIT.md` — security hardening log
+- `docs/DEPLOY.md` / `docs/SECURITY.md` — pilot
+- `AGENTS.md` — coding-agent rules
 
 ## License
 

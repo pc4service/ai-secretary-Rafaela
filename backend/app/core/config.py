@@ -104,10 +104,40 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "change-me-in-production-please-use-a-long-random-string"
     ENCRYPTION_KEY: Optional[str] = None  # Fernet key for token encryption
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 1 day
+    # Refuse the anonymous "demo-user" fallback on user-scoped endpoints.
+    # Always on in production — see auth_required below.
+    REQUIRE_AUTH: bool = False
+
+    # Rate limiting (shared across workers via Redis when available)
+    RATE_LIMIT_REQUESTS: int = 60
+    RATE_LIMIT_WINDOW_SECONDS: int = 60
+    # How many reverse proxies sit in front. 0 = none, so X-Forwarded-For is
+    # ignored (a client could otherwise spoof it to dodge the limit). Set to 1
+    # behind the bundled nginx, 2 behind Cloudflare -> nginx.
+    TRUSTED_PROXY_HOPS: int = 0
 
     # GDPR
     DEFAULT_RETENTION_DAYS: int = 30
     AUDIT_LOG_RETENTION_DAYS: int = 365
+
+    # Knowledge / RAG
+    # Host path is mounted in docker-compose; container default /knowledge
+    KNOWLEDGE_DIR: str = "/knowledge"
+    QDRANT_URL: Optional[str] = None  # e.g. http://qdrant:6333 — optional
+    KNOWLEDGE_COLLECTION: str = "rafaela_knowledge"
+    KNOWLEDGE_TOP_K: int = 5
+    KNOWLEDGE_EMBED_MODEL: str = "text-embedding-3-small"
+
+    @property
+    def auth_required(self) -> bool:
+        """
+        Whether user-scoped endpoints may fall back to the demo user.
+
+        Production never allows it, regardless of REQUIRE_AUTH: an anonymous
+        caller would otherwise act as demo-user and reach that account's
+        conversations and OAuth tokens.
+        """
+        return self.REQUIRE_AUTH or self.ENVIRONMENT == "production"
 
 
 settings = Settings()

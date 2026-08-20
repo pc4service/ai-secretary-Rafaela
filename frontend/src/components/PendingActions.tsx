@@ -40,6 +40,7 @@ function actionTypeLabel(t: string) {
     ms_create_event: "Outlook · Δημιουργία ραντεβού",
     google_send_email: "Gmail · Αποστολή email",
     google_create_event: "Google Calendar · Ραντεβού",
+    knowledge_save_page: "Knowledge · Αποθήκευση σελίδας",
   };
   return map[t] || t;
 }

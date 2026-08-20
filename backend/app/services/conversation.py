@@ -65,13 +65,22 @@ async def add_message(
 async def get_conversation_messages(
     conversation_id: str,
     limit: int = 50,
+    user_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
+    """
+    Messages of a conversation.
+
+    Pass user_id whenever the caller is a request: without it this returns any
+    conversation's messages to anyone holding the id. It stays optional so
+    internal callers that already loaded the conversation for a known owner do
+    not have to repeat the check.
+    """
     async with AsyncSessionLocal() as session:
+        query = select(Message).where(Message.conversation_id == conversation_id)
+        if user_id is not None:
+            query = query.join(Conversation).where(Conversation.user_id == user_id)
         result = await session.execute(
-            select(Message)
-            .where(Message.conversation_id == conversation_id)
-            .order_by(Message.created_at.asc())
-            .limit(limit)
+            query.order_by(Message.created_at.asc()).limit(limit)
         )
         messages = result.scalars().all()
         return [
