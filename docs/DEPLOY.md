@@ -28,10 +28,10 @@ cd /opt
 git clone <REPO_URL> rafaela && cd rafaela
 # ή scp/unzip του project
 cp .env.prod.example .env.prod
-nano .env.prod
+nano .env.prod   # ή: ./scripts/pilot_deploy.sh check
 ```
 
-Συμπλήρωσε:
+Συμπλήρωσε (πλήρες template: `.env.prod.example`):
 
 ```env
 ENVIRONMENT=production
@@ -54,7 +54,11 @@ QDRANT_URL=http://qdrant:6333
 ### 3. Start
 
 ```bash
-docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+./scripts/pilot_deploy.sh check
+./scripts/pilot_deploy.sh up
+./scripts/pilot_deploy.sh smoke
+# ή χειροκίνητα:
+# docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
 curl -sf http://127.0.0.1:8000/health
 curl -sf http://127.0.0.1:8000/api/v1/knowledge/status
 ```
@@ -136,12 +140,13 @@ sudo ufw enable
 ## Backups (ελάχιστο)
 
 ```bash
-# Παράδειγμα dump
-docker compose -f docker-compose.prod.yml exec -T db \
-  pg_dump -U secretary secretary > backup_$(date +%F).sql
+./scripts/pilot_deploy.sh backup   # → backups/secretary_YYYYMMDD_HHMMSS.sql (κρατά 14)
+# ή:
+# docker compose -f docker-compose.prod.yml --env-file .env.prod exec -T db \
+#   pg_dump -U secretary secretary > backup_$(date +%F).sql
 ```
 
-Κράτα 7–14 ημερήσια αντίγραφα εκτός VM.
+Κράτα 7–14 ημερήσια αντίγραφα **και** αντίγραφο εκτός VM (cron + offsite).
 
 ---
 

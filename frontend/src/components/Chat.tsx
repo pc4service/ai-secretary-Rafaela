@@ -25,12 +25,15 @@ type Props = {
   conversationId?: string | null;
   onConversationId?: (id: string | null) => void;
   showSidebar?: boolean;
+  /** Fired when a HITL pending action is created or resolved (sidebar badge). */
+  onPendingChange?: () => void;
 };
 
 export default function Chat({
   conversationId: controlledId,
   onConversationId,
   showSidebar = true,
+  onPendingChange,
 }: Props) {
   const [localConvId, setLocalConvId] = useState<string | null>(null);
   const conversationId =
@@ -140,6 +143,7 @@ export default function Chat({
             }
             return next;
           });
+          if (data.pending_action_id) onPendingChange?.();
           setStatus(null);
         },
         onError: (message) => {
@@ -195,21 +199,28 @@ export default function Chat({
     setResolving(actionId);
     try {
       const result = await resolveAction(actionId, approve);
+      const resultText = String(result.result || "");
+      const isDryRun = /dry[_-]?run/i.test(resultText) || /Would create|Would send/i.test(resultText);
       setMessages((prev) => {
         const next = [...prev];
         const msg = { ...next[msgIndex] };
         msg.actionResolved = result.status;
         msg.pendingActionId = null;
         if (approve) {
-          msg.content += `\n\n✅ Ενέργεια ${
-            result.status === "executed" ? "εκτελέστηκε" : "εγκρίθηκε"
-          }. ${result.result || ""}`;
+          const verb =
+            result.status === "executed"
+              ? isDryRun
+                ? "προσομοιώθηκε (DRY_RUN)"
+                : "εκτελέστηκε"
+              : "εγκρίθηκε";
+          msg.content += `\n\n✅ Ενέργεια ${verb}. ${resultText}`;
         } else {
           msg.content += "\n\n❌ Ενέργεια απορρίφθηκε.";
         }
         next[msgIndex] = msg;
         return next;
       });
+      onPendingChange?.();
     } catch (err: any) {
       alert(err.message);
     } finally {

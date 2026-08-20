@@ -1,8 +1,8 @@
 # =============================================================================
 # Rafaela AI Secretary – Production Compose
 # Usage:
-#   cp .env.example .env.prod   # then fill strong secrets
-#   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+#   cp .env.prod.example .env.prod   # then fill strong secrets
+#   ./scripts/pilot_deploy.sh check && ./scripts/pilot_deploy.sh up
 # =============================================================================
 
 services:

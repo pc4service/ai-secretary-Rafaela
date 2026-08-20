@@ -45,7 +45,35 @@ function actionTypeLabel(t: string) {
   return map[t] || t;
 }
 
-export default function PendingActionsPanel() {
+/** Parse executor result strings like "{'status': 'dry-run', 'message': '…'}". */
+function formatResult(raw?: string | null): { dryRun: boolean; text: string } | null {
+  if (!raw) return null;
+  const text = String(raw);
+  const dryRun = /dry[_-]?run/i.test(text) || /Would create|Would send|προσομοίωση/i.test(text);
+  // Prefer a readable message if it looks like a Python/JSON dict.
+  const msgMatch = text.match(/['"]message['"]\s*:\s*['"](.+?)['"]\s*[,}]/);
+  if (msgMatch) {
+    return { dryRun, text: msgMatch[1].replace(/\\'/g, "'") };
+  }
+  try {
+    const normalized = text.replace(/'/g, '"');
+    const obj = JSON.parse(normalized);
+    if (obj && typeof obj === "object") {
+      const m = obj.message || obj.detail || obj.status;
+      if (m) return { dryRun: dryRun || obj.status === "dry-run", text: String(m) };
+    }
+  } catch {
+    /* keep raw */
+  }
+  return { dryRun, text };
+}
+
+type Props = {
+  /** Notify parent (e.g. sidebar badge) after load/resolve */
+  onChange?: () => void;
+};
+
+export default function PendingActionsPanel({ onChange }: Props) {
   const [pending, setPending] = useState<Action[]>([]);
   const [history, setHistory] = useState<Action[]>([]);
   const [loading, setLoading] = useState(true);
@@ -58,12 +86,13 @@ export default function PendingActionsPanel() {
       const [p, h] = await Promise.all([getPendingActions("pending"), getActionHistory()]);
       setPending(p);
       setHistory(h);
+      onChange?.();
     } catch (e) {
       console.error(e);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [onChange]);
 
   useEffect(() => {
     load();
@@ -171,11 +200,27 @@ export default function PendingActionsPanel() {
                   {a.description}
                 </pre>
 
-                {a.result && a.status !== "pending" && (
-                  <p className="text-xs text-slate-400 mb-3 border-t border-slate-100 dark:border-slate-800 pt-2">
-                    Αποτέλεσμα: {a.result}
-                  </p>
-                )}
+                {a.result && a.status !== "pending" && (() => {
+                  const parsed = formatResult(a.result);
+                  if (!parsed) return null;
+                  return (
+                    <div
+                      className={cn(
+                        "text-xs mb-3 border-t pt-2",
+                        parsed.dryRun
+                          ? "border-amber-200 dark:border-amber-900 text-amber-800 dark:text-amber-200"
+                          : "border-slate-100 dark:border-slate-800 text-slate-500"
+                      )}
+                    >
+                      {parsed.dryRun && (
+                        <span className="inline-flex items-center rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-200 px-2 py-0.5 font-semibold mr-2">
+                          DRY_RUN
+                        </span>
+                      )}
+                      <span className="whitespace-pre-wrap">{parsed.text}</span>
+                    </div>
+                  );
+                })()}
 
                 {a.status === "pending" && (
                   <div className="flex gap-2 pt-1">

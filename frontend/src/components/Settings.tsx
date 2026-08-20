@@ -409,30 +409,49 @@ export default function SettingsPanel() {
           <Shield className="text-rose-600" size={20} />
           <h2 className="font-medium">GDPR & Απορρήτο</h2>
         </div>
-        <dl className="space-y-3 text-sm">
-          <div className="flex justify-between">
-            <dt className="text-slate-500">Περιβάλλον</dt>
-            <dd className="font-medium">{data?.environment}</dd>
+
+        {data?.dry_run && (
+          <div className="mb-4 rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-3 py-2.5">
+            <p className="text-sm font-semibold text-amber-800 dark:text-amber-200">
+              Pilot mode · DRY_RUN
+            </p>
+            <p className="text-xs text-amber-700/90 dark:text-amber-300/90 mt-0.5 leading-relaxed">
+              Οι εγκρίσεις HITL προσομοιώνονται — δεν γράφουν σε πραγματικό
+              ημερολόγιο/email μέχρι να αλλάξει το backend flag.
+            </p>
           </div>
-          <div className="flex justify-between">
+        )}
+
+        <dl className="space-y-3 text-sm">
+          <div className="flex justify-between gap-3">
+            <dt className="text-slate-500">Περιβάλλον</dt>
+            <dd className="font-medium text-right">{data?.environment}</dd>
+          </div>
+          <div className="flex justify-between gap-3">
             <dt className="text-slate-500">Dry-run mode</dt>
-            <dd className="font-medium">
+            <dd className="font-medium text-right">
               {data?.dry_run ? (
                 <span className="text-amber-600">Ενεργό (ασφαλές δοκιμές)</span>
               ) : (
-                <span className="text-emerald-600">Απενεργοποιημένο</span>
+                <span className="text-red-600">Απενεργοποιημένο · πραγματικά writes</span>
               )}
             </dd>
           </div>
-          <div className="flex justify-between">
+          <div className="flex justify-between gap-3">
             <dt className="text-slate-500">Διατήρηση δεδομένων</dt>
-            <dd className="font-medium">{data?.retention_days} ημέρες</dd>
+            <dd className="font-medium text-right">{data?.retention_days} ημέρες</dd>
+          </div>
+          <div className="flex justify-between gap-3">
+            <dt className="text-slate-500">Mail</dt>
+            <dd className="font-medium text-right text-slate-600 dark:text-slate-300">
+              Read-only · drafts only
+            </dd>
           </div>
         </dl>
         <p className="mt-4 text-xs text-slate-400 leading-relaxed">
-          Όλες οι ενέργειες εγγραφής (αποστολή email, δημιουργία ραντεβού) απαιτούν
-          ρητή επιβεβαίωση. Σε dry-run mode δεν εκτελούνται πραγματικές αλλαγές.
-          Μπορείς να ζητήσεις εξαγωγή ή διαγραφή των δεδομένων σου μέσω του chat.
+          Όλες οι ενέργειες εγγραφής (ημερολόγιο, knowledge save) απαιτούν ρητή
+          επιβεβαίωση στην καρτέλα Ενέργειες. Η αποστολή email από τον agent δεν
+          είναι ενεργή. Μπορείς να ζητήσεις εξαγωγή ή διαγραφή δεδομένων μέσω chat.
         </p>
       </div>
     </div>

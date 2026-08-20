@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Chat from "@/components/Chat";
 import SettingsPanel from "@/components/Settings";
@@ -15,9 +15,11 @@ import {
   ClipboardList,
   LogOut,
   Loader2,
+  Shield,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getMe, logout, type AuthUser } from "@/lib/auth";
+import { getPendingActions, getSettings } from "@/lib/api";
 
 type Tab = "chat" | "actions" | "settings";
 
@@ -28,6 +30,25 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [conversationId, setConversationId] = useState<string | null>(null);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [dryRun, setDryRun] = useState(true);
+  const [environment, setEnvironment] = useState<string>("");
+
+  const refreshMeta = useCallback(async () => {
+    try {
+      const [pending, settings] = await Promise.all([
+        getPendingActions("pending").catch(() => []),
+        getSettings().catch(() => null),
+      ]);
+      setPendingCount(Array.isArray(pending) ? pending.length : 0);
+      if (settings) {
+        setDryRun(!!settings.dry_run);
+        setEnvironment(settings.environment || "");
+      }
+    } catch {
+      /* non-fatal */
+    }
+  }, []);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -44,13 +65,27 @@ export default function Home() {
           return;
         }
         setUser(me);
+        await refreshMeta();
       } catch {
         router.replace("/login");
       } finally {
         setLoading(false);
       }
     })();
-  }, [router]);
+  }, [router, refreshMeta]);
+
+  // Keep the actions badge fresh while the user is in the app.
+  useEffect(() => {
+    if (loading) return;
+    const id = window.setInterval(() => {
+      void refreshMeta();
+    }, 30_000);
+    return () => window.clearInterval(id);
+  }, [loading, refreshMeta]);
+
+  useEffect(() => {
+    if (tab === "actions") void refreshMeta();
+  }, [tab, refreshMeta]);
 
   async function onLogout() {
     await logout();
@@ -112,8 +147,20 @@ export default function Home() {
                 : "text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800"
             )}
           >
-            <ClipboardList size={18} />
-            <span className="hidden md:inline">Ενέργειες</span>
+            <span className="relative">
+              <ClipboardList size={18} />
+              {pendingCount > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-amber-500 text-white text-[10px] font-semibold flex items-center justify-center">
+                  {pendingCount > 9 ? "9+" : pendingCount}
+                </span>
+              )}
+            </span>
+            <span className="hidden md:inline flex-1 text-left">Ενέργειες</span>
+            {pendingCount > 0 && (
+              <span className="hidden md:inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-amber-500 text-white text-[11px] font-semibold">
+                {pendingCount}
+              </span>
+            )}
           </button>
           <button
             onClick={() => setTab("settings")}
@@ -130,6 +177,23 @@ export default function Home() {
         </nav>
 
         <div className="p-2 border-t border-slate-100 dark:border-slate-800 space-y-1">
+          {dryRun && (
+            <div
+              className="hidden md:flex items-start gap-2 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-900 px-2.5 py-2 mb-1"
+              title="Οι εγκεκριμένες εγγραφές προσομοιώνονται μέχρι να απενεργοποιηθεί το DRY_RUN"
+            >
+              <Shield size={14} className="text-amber-600 mt-0.5 flex-shrink-0" />
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold text-amber-800 dark:text-amber-200">
+                  DRY_RUN ενεργό
+                </p>
+                <p className="text-[10px] text-amber-700/80 dark:text-amber-300/80 leading-snug">
+                  HITL OK · χωρίς πραγματικά writes
+                  {environment ? ` · ${environment}` : ""}
+                </p>
+              </div>
+            </div>
+          )}
           <button
             onClick={onLogout}
             className="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800"
@@ -148,7 +212,7 @@ export default function Home() {
             Επανάληψη onboarding
           </button>
           <p className="hidden md:block text-[10px] text-slate-400 text-center pt-1">
-            GDPR · Streaming chat
+            GDPR · HITL
           </p>
         </div>
       </aside>
@@ -159,9 +223,12 @@ export default function Home() {
             conversationId={conversationId}
             onConversationId={setConversationId}
             showSidebar
+            onPendingChange={() => void refreshMeta()}
           />
         )}
-        {tab === "actions" && <PendingActionsPanel />}
+        {tab === "actions" && (
+          <PendingActionsPanel onChange={() => void refreshMeta()} />
+        )}
         {tab === "settings" && <SettingsPanel />}
       </main>
     </div>
