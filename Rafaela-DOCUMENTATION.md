@@ -332,11 +332,13 @@ make shell     # shell στο backend container
 
 ## 11. Επόμενα Βήματα
 
-1. Semantic RAG (Qdrant) πάνω στο υπάρχον keyword API  
-2. `REQUIRE_AUTH` lock στα API  
-3. Unit tests  
-4. Πραγματικό GDPR JSON export στο UI  
-5. Multi-tenant / billing **μετά** τον πρώτο pilot  
+1. ~~Semantic RAG (Qdrant)~~ ✅  
+2. ~~`REQUIRE_AUTH` + isolation~~ ✅ (βλ. `docs/AUDIT.md`)  
+3. ~~Unit/guard tests + CI~~ ✅ (`make test`)  
+4. Merge hardening → `master` + pilot deploy  
+5. Πραγματικό GDPR JSON export στο UI  
+6. Multi-tenant / billing / per-tenant knowledge **μετά** τον πρώτο pilot  
+
 
 Graphify / ECC / UI-UX Pro Max: skills του coding assistant — δεν μπαίνουν ως runtime της Rafaela.
 

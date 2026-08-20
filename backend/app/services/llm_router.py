@@ -311,11 +311,12 @@ def list_llm_endpoints() -> List[LLMEndpoint]:
 
 
 def openai_oauth_endpoint(access_token: str) -> LLMEndpoint:
-    """Haystack talks to our in-process Codex shim with the user's OAuth token."""
+    """Marker endpoint — build_chat_generator routes this in-process, not over HTTP."""
     return LLMEndpoint(
         name="openai-oauth",
         model=settings.OPENAI_OAUTH_MODEL or "gpt-5.5",
-        base_url="http://127.0.0.1:8000/internal/codex/v1",
+        # Not a real URL. CodexOAuthChatGenerator calls codex_chat_completion directly.
+        base_url="codex-oauth",
         api_key=access_token,
         source="oauth",
     )

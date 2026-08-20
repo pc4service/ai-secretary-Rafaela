@@ -89,3 +89,18 @@ def test_docs_are_reachable_in_this_environment():
     assert settings.ENVIRONMENT != "production"
     assert client.get("/openapi.json").status_code == 200
     assert client.get("/docs").status_code == 200
+
+
+# --- P1-7: no public Codex bearer relay ---
+
+def test_internal_codex_route_is_gone():
+    """ChatGPT OAuth is in-process only; a public shim would be a token relay."""
+    res = client.post(
+        "/internal/codex/v1/chat/completions",
+        json={"messages": [{"role": "user", "content": "hi"}]},
+        headers={"Authorization": "Bearer anything"},
+    )
+    assert res.status_code == 404
+    # Confirm it is not merely auth-gated — the route must not exist at all.
+    paths = {getattr(r, "path", None) for r in app.routes}
+    assert "/internal/codex/v1/chat/completions" not in paths

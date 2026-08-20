@@ -322,7 +322,7 @@ server, όχι το introspection.
 | P0-10 | **P0** | `/auth/{microsoft,google}/callback`: το `state` χρησιμοποιείται **απευθείας ως user_id** χωρίς καμία επαλήθευση. Μη-αυθεντικοποιημένος καλών γράφει OAuth tokens σε λογαριασμό της επιλογής του | ✅ done |
 | P1-5 | P1 | `/api/v1/system-prompt` χωρίς auth — εκθέτει πλήρη πολιτική agent, λίστα tools και τους κανόνες anti-injection | ✅ done |
 | P1-6 | P1 | Hardcoded `http://localhost:3000` redirect στα MS/Google callbacks ενώ αλλού χρησιμοποιείται `settings.FRONTEND_URL` — σπάει το connect flow σε deploy | ✅ done |
-| P1-7 | P1 | `/internal/codex/v1/chat/completions` εκτεθειμένο στη δημόσια πόρτα· bearer relay που θα έπρεπε να είναι internal-only | ⬜ open |
+| P1-7 | P1 | `/internal/codex/v1/chat/completions` εκτεθειμένο στη δημόσια πόρτα· bearer relay που θα έπρεπε να είναι internal-only | ✅ done |
 | P2-7 | P2 | `_oauth_states` και `_pending` in-memory — με >1 worker το login/connect σπάει (state σε worker A, callback σε worker B)· χάνονται σε restart | ✅ done |
 | P2-8 | P2 | `/docs`, `/redoc`, `/openapi.json` πάντα ενεργά — σε production δημοσιεύουν όλη την επιφάνεια API | ✅ done |
 | P2-9 | P2 | CORS: `http://localhost:3000` προστίθεται πάντα με `allow_credentials=True`, και σε production | ✅ done |
@@ -364,7 +364,7 @@ await save_oauth_token(user_id=state, provider="microsoft", ...)
 | `resolve_user_id` (session· demo fallback εκτός production) | 8 |
 | Σκόπιμα δημόσια (`/`, `/health`, `/knowledge/status`, login start/providers/me/logout, demo) | 11 |
 | OAuth callbacks (δημόσια εξ ορισμού — 4 από 4 χρειάζονται state validation· **2 δεν το έχουν**) | 5 |
-| Χωρίς auth, υπό εξέταση (`/system-prompt`, `/internal/codex/*`) | 2 |
+| Χωρίς auth, υπό εξέταση (`/system-prompt`, `/internal/codex/*`) | 2 → και τα δύο κλειστά (Φάσεις 9 + 11) |
 
 ---
 
@@ -568,3 +568,49 @@ replay rejected (good)
 ```
 
 Πριν, ο δεύτερος χρήστης θα κοβόταν κι αυτός.
+
+---
+
+## Φάση 11 — 2026-08-21 · P1-7 (αφαίρεση public Codex relay)
+
+### Γιατί όχι «κλείδωμα» αλλά διαγραφή
+
+Το endpoint παρουσιαζόταν ως internal OpenAI-compatible shim ώστε το Haystack
+να μιλάει στο ChatGPT OAuth. Στην πράξη:
+
+1. Το `build_chat_generator` **ήδη** δρομολογεί `openai-oauth` in-process μέσω
+   `CodexOAuthChatGenerator` (αποφυγή self-HTTP deadlock σε single worker).
+2. Κανένας άλλος caller δεν χτυπά το HTTP path.
+3. Όσο έμενε δημόσιο, οποιοσδήποτε με κλεμμένο ChatGPT access token μπορούσε
+   να το κάψει μέσω της origin μας (relay / abuse / log surface).
+
+Επομένως το σωστό fix είναι **να μην υπάρχει route**, όχι να μπει auth μπροστά.
+
+### Τι άλλαξε
+
+| Αρχείο | Αλλαγή |
+|--------|--------|
+| `main.py` | Αφαιρέθηκαν `CodexChatRequest` + `POST /internal/codex/v1/chat/completions` |
+| `services/llm_router.py` | `openai_oauth_endpoint.base_url` → marker `"codex-oauth"` (όχι `http://127.0.0.1:…`) |
+| `tests/test_public_surface.py` | 404 + route απουσιάζει από `app.routes` |
+| `docs/ROADMAP.md`, `README.md`, mirrors | Sync προόδου με hardening branch |
+
+### Επαλήθευση
+
+```
+make test   # περιλαμβάνει test_internal_codex_route_is_gone
+```
+
+| Έλεγχος | Αποτέλεσμα |
+|---------|-----------|
+| `POST /internal/codex/v1/chat/completions` | 404 |
+| path στο `app.routes` | absent |
+| OAuth chat path | ακόμα in-process (`CodexOAuthChatGenerator`) |
+
+### Ανοιχτά μετά τη Φάση 11
+
+| # | Priority | Θέμα | Κατάσταση |
+|---|----------|------|-----------|
+| P3-2 | P3 | `knowledge/` κοινό για όλους — όχι per-tenant | ⬜ open (μετά pilot) |
+
+**P0/P1/P2 του audit: κλειστά.** Επόμενο βήμα προϊόντος: merge → `master`, pilot.

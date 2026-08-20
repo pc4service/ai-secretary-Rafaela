@@ -744,27 +744,9 @@ async def openai_disconnect(user: dict = Depends(require_user)):
     return {"status": "disconnected", "provider": "openai"}
 
 
-class CodexChatRequest(BaseModel):
-    model: Optional[str] = None
-    messages: List[dict] = Field(default_factory=list)
-
-
-@app.post("/internal/codex/v1/chat/completions")
-async def internal_codex_chat(body: CodexChatRequest, request: Request):
-    """OpenAI-compatible shim so Haystack can use ChatGPT OAuth tokens."""
-    from app.services.openai_oauth import codex_chat_completion
-
-    auth = request.headers.get("Authorization") or ""
-    token = auth[7:].strip() if auth.lower().startswith("bearer ") else ""
-    if not token:
-        raise HTTPException(status_code=401, detail="Missing ChatGPT OAuth token")
-    try:
-        return await codex_chat_completion(
-            token, body.messages, model=body.model or settings.OPENAI_OAUTH_MODEL
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
+# ChatGPT OAuth runs in-process via CodexOAuthChatGenerator (llm_router).
+# There is intentionally no HTTP /internal/codex shim — a public bearer-token
+# relay would let anyone burn a stolen OAuth token through our origin.
 
 # ---------- HITL ----------
 
