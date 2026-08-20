@@ -4,8 +4,6 @@ Includes: chat + memory, OAuth, HITL, rate limiting, audit.
 """
 
 from contextlib import asynccontextmanager
-from collections import defaultdict
-from time import time
 from msal import SerializableTokenCache
 from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -42,10 +40,7 @@ from app.services.llm_router import llm_status_public
 
 logger = structlog.get_logger()
 
-# Simple in-memory rate limiter (per IP)
-_rate_buckets: Dict[str, list] = defaultdict(list)
-RATE_LIMIT = 60  # requests
-RATE_WINDOW = 60  # seconds
+# Rate limiting lives in services/rate_limit.py — shared across workers.
 
 
 @asynccontextmanager
@@ -139,13 +134,18 @@ app.add_middleware(
 async def rate_limit_middleware(request: Request, call_next):
     if request.url.path.startswith("/health"):
         return await call_next(request)
-    client = request.client.host if request.client else "unknown"
-    now = time()
-    bucket = _rate_buckets[client]
-    _rate_buckets[client] = [t for t in bucket if now - t < RATE_WINDOW]
-    if len(_rate_buckets[client]) >= RATE_LIMIT:
-        return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded. Try again later."})
-    _rate_buckets[client].append(now)
+
+    from app.services.rate_limit import client_ip, limiter
+
+    key = client_ip(request)
+    allowed, retry_after = await limiter().hit(key)
+    if not allowed:
+        logger.info("rate_limited", client=key, path=request.url.path)
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "Rate limit exceeded. Try again later."},
+            headers={"Retry-After": str(retry_after)},
+        )
     return await call_next(request)
 
 

@@ -111,6 +111,12 @@ curl https://secretary.example.com/health
 - `X-Forwarded-Proto` για σωστά redirects OAuth  
 - Frontend WebSocket upgrade headers (Next.js)  
 
+> **Σημαντικό:** το nginx στέλνει `X-Forwarded-For`, αλλά το backend το διαβάζει
+> μόνο αν του πεις πόσα proxies έχει μπροστά του. Θέσε **`TRUSTED_PROXY_HOPS=1`**
+> (ή `2` πίσω από Cloudflare → nginx). Στο `0` όλοι οι χρήστες μοιράζονται τον
+> κάδο του nginx και το rate limit χτυπά όλους μαζί. Το `docker-compose.prod.yml`
+> το θέτει ήδη σε `1`.
+
 ## 8. Προαιρετικά
 
 **Μόνο localhost ports στο Docker (ήδη στο prod compose):**

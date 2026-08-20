@@ -108,6 +108,14 @@ class Settings(BaseSettings):
     # Always on in production — see auth_required below.
     REQUIRE_AUTH: bool = False
 
+    # Rate limiting (shared across workers via Redis when available)
+    RATE_LIMIT_REQUESTS: int = 60
+    RATE_LIMIT_WINDOW_SECONDS: int = 60
+    # How many reverse proxies sit in front. 0 = none, so X-Forwarded-For is
+    # ignored (a client could otherwise spoof it to dodge the limit). Set to 1
+    # behind the bundled nginx, 2 behind Cloudflare -> nginx.
+    TRUSTED_PROXY_HOPS: int = 0
+
     # GDPR
     DEFAULT_RETENTION_DAYS: int = 30
     AUDIT_LOG_RETENTION_DAYS: int = 365

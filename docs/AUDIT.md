@@ -226,7 +226,7 @@ tools, άρα κάθε pending action γραφόταν και εκτελούντ
 |---|------|-----------|
 | P3-1 | `REQUIRE_AUTH` αναφέρεται σε `SECURITY.md`/CI αλλά δεν υπάρχει στο `config.py` | ✅ done |
 | P3-2 | Το `knowledge/` είναι κοινό για όλους τους χρήστες — δεν υπάρχει per-tenant διαχωρισμός | ⬜ open |
-| P3-3 | Rate limiter in-memory per-IP — δεν αντέχει multi-worker/multi-instance (θέλει Redis) | ⬜ open |
+| P3-3 | Rate limiter in-memory per-IP — δεν αντέχει multi-worker/multi-instance (θέλει Redis) | ✅ done |
 
 ---
 
@@ -500,3 +500,71 @@ replay rejected (good)
 Με το P2-8, το `/openapi.json` **δεν** είναι διαθέσιμο σε production. Ο κανόνας
 της Φάσης 6 (πηγή αλήθειας το OpenAPI αντί για introspection) ισχύει, αλλά ο
 έλεγχος πρέπει να τρέχει σε dev/trial instance.
+
+---
+
+## Φάση 10 — 2026-08-20 · P3-3 (rate limiting)
+
+### Το εύρημα ήταν μεγαλύτερο απ' ό,τι καταγράφηκε
+
+Το P3-3 είχε γραφτεί ως «δεν αντέχει multi-worker». Διαβάζοντας τον κώδικα μαζί
+με το `docker/nginx/*.conf` προέκυψαν **τρία** προβλήματα, με το δεύτερο να είναι
+το σοβαρότερο:
+
+| # | Πρόβλημα | Συνέπεια |
+|---|----------|----------|
+| 1 | Μέτρηση ανά process | Με N workers το πραγματικό όριο ήταν N×60 |
+| 2 | **Κλειδί το `request.client.host`** | Πίσω από το τεκμηριωμένο nginx αυτό είναι η IP του **proxy**, ίδια για όλους. Ένας θορυβώδης χρήστης έκοβε **όλους** — αυτο-προκαλούμενο DoS |
+| 3 | `defaultdict` χωρίς καθαρισμό κλειδιών | Ένα κλειδί ανά IP που εμφανίστηκε ποτέ, για πάντα |
+
+Το nginx **στέλνει** `X-Forwarded-For` (`docker/nginx/rafaela.conf:76`), απλώς
+κανείς δεν το διάβαζε.
+
+### Τι άλλαξε
+
+| Αρχείο | Αλλαγή |
+|--------|--------|
+| `services/rate_limit.py` | **Νέο.** `client_ip()` + `RateLimiter` (fixed window· async Redis· bounded local fallback) |
+| `main.py` | Το middleware χρησιμοποιεί τον limiter· προστέθηκε `Retry-After`· έφυγαν τα `_rate_buckets`/`RATE_LIMIT`/`RATE_WINDOW` |
+| `core/config.py`, `.env.example` | `RATE_LIMIT_REQUESTS`, `RATE_LIMIT_WINDOW_SECONDS`, `TRUSTED_PROXY_HOPS` |
+| `docker-compose.prod.yml` | `TRUSTED_PROXY_HOPS: 1` (τρέχει πίσω από nginx) |
+| `docs/NGINX.md` | Ρητή προειδοποίηση για τη ρύθμιση |
+
+### Σχεδιαστικές αποφάσεις
+
+- **Το `X-Forwarded-For` δεν γίνεται ποτέ εμπιστευτό από μόνο του.** Διαβάζεται
+  μόνο όταν το `TRUSTED_PROXY_HOPS` δηλώνει πόσα proxies υπάρχουν, και παίρνεται
+  το **n-οστό από το τέλος** — ό,τι είναι αριστερότερα το έστειλε ο client.
+  Default `0` (αγνοείται): αν το εμπιστευόμασταν τυφλά, οποιοσδήποτε θα παρέκαμπτε
+  το όριο στέλνοντας τυχαία IP σε κάθε αίτημα. Καλύπτεται με test.
+- **Async Redis εδώ**, σε αντίθεση με το sync `StateStore`: αυτό τρέχει σε **κάθε**
+  request, όχι μία φορά ανά OAuth flow, οπότε δεν πρέπει να μπλοκάρει το event loop.
+- **Fixed window** αντί για sliding: μία `INCR` ανά αίτημα. Γνωστό tradeoff —
+  στο όριο δύο παραθύρων μπορούν να περάσουν έως 2× αιτήματα (φάνηκε στη μέτρηση:
+  3 στο ένα bucket + 68 στο επόμενο). Αποδεκτό για abuse control σε αυτό το μέγεθος.
+- **Bounded fallback**: `MAX_LOCAL_KEYS` καθαρίζει τα παλιά buckets, ώστε να μην
+  επανέλθει το πρόβλημα #3 όταν λείπει το Redis.
+
+### Επαλήθευση
+
+```
+117 passed  (από 105· νέο tests/test_rate_limit.py)
+```
+
+| Έλεγχος | Αποτέλεσμα |
+|---------|-----------|
+| 70 αιτήματα με όριο 60/min | 63 allowed / 7 blocked (fixed-window boundary) |
+| `Retry-After` σε 429 | `retry-after: 57` |
+| `/health` εξαιρείται | 200 |
+| Μετρητές στο Redis | `rafaela:rl:29787553:127.0.0.1 = 68`, ttl 56 |
+| Δύο instances (≈ δύο workers) μοιράζονται budget | 3ο αίτημα μπλοκάρεται από το «άλλο worker» |
+| Spoofed `X-Forwarded-For` με `HOPS=0` | αγνοείται — ίδιος κάδος |
+
+Πίσω από proxy (`TRUSTED_PROXY_HOPS=1`, όριο 5/min):
+
+```
+203.0.113.10   allowed=5 blocked=2     <- ο θορυβώδης κόβεται
+203.0.113.99   allowed=3 blocked=0     <- ο άλλος χρήστης ανεπηρέαστος
+```
+
+Πριν, ο δεύτερος χρήστης θα κοβόταν κι αυτός.

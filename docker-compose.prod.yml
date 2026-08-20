@@ -22,6 +22,10 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
       KNOWLEDGE_DIR: /knowledge
+      # Rate limiting keys on X-Forwarded-For only for this many proxies.
+      # The documented deployment puts nginx in front, so 1. Raise to 2 behind
+      # Cloudflare -> nginx. At 0 every user shares the proxy's bucket.
+      TRUSTED_PROXY_HOPS: ${TRUSTED_PROXY_HOPS:-1}
     volumes:
       - ./knowledge:/knowledge
     depends_on:
