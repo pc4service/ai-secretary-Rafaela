@@ -1,15 +1,15 @@
 # Rafaela AI Secretary — Ανακεφαλαίωση & Επαγγελματικό Roadmap
 
-**Έκδοση εγγράφου:** 1.3  
+**Έκδοση εγγράφου:** 1.4  
 **Ημερομηνία:** 21 Αυγούστου 2026  
 **Στόχος:** Από trial prototype → πλήρες, παρουσιάσιμο και εμπορεύσιμο προϊόν για εταιρική χρήση.
 
 ---
 
-## Πρόοδος υλοποίησης (ενημέρωση 21 Αυγούστου 2026)
+## Πρόοδος υλοποίησης (ενημέρωση 21 Αυγούστου 2026 — βράδυ)
 
 Κατάσταση **από το πραγματικό tree**. Root: `C:\DEVELOP\ai-secretary`.
-Λεπτομέρειες hardening: `docs/AUDIT.md` (Φάσεις 1–11 · P0/P1/P2 κλειστά).
+Λεπτομέρειες hardening: `docs/AUDIT.md` (Φάσεις 1–12 · P0/P1/P2 κλειστά + latency).
 
 **Γρήγορη εκκίνηση**
 
@@ -26,10 +26,11 @@ docker compose up --build
 |---|---------|-----------|----------|
 | 1 | Login (Demo / Google / MS identity) | ✅ | `api_auth.py` · cookie session |
 | 2 | Integration OAuth MS365 + Google | ✅ | Silent refresh MS · mail **read-only** · validated OAuth state |
-| 3 | ChatGPT / Codex OAuth (Settings) | ✅ | in-process `CodexOAuthChatGenerator` · **όχι** public HTTP shim |
-| 4 | LLM failover + timeout | ✅ | `llm_router.py` |
+| 3 | ChatGPT / Codex OAuth (Settings) | ✅ | in-process · `REASONING_EFFORT=low` · incomplete/max_time_limit → failover |
+| 4 | LLM failover + timeout | ✅ | `llm_router.py` · markers για incomplete |
 | 5 | HITL + DRY_RUN | ✅ | owner-scoped actions · email send blocked |
-| 6 | Streaming + onboarding + sidebar | ✅ | Phase 3 UI |
+| 6 | Streaming + onboarding + sidebar | ✅ | + **chat timing** (έναρξη / απάντηση / διάρκεια) |
+| 6b | Agent latency A+B+E | ✅ | intent router · filtered tools · `AGENT_MAX_STEPS` |
 | 7 | Knowledge **keyword** RAG | ✅ | `knowledge/*.md` + `search_knowledge` |
 | 8 | Knowledge **semantic** (Qdrant) | ✅ | compose `qdrant` + hybrid + incremental index |
 | 9 | `REQUIRE_AUTH` + per-user isolation | ✅ | production always-on · conversations/actions IDOR closed |
@@ -521,12 +522,13 @@ python scripts/index_knowledge.py --path knowledge/ --recreate
 ## Επόμενη άμεση ενέργεια (21 Αυγούστου 2026)
 
 ```text
-☑ Hardening P0–P2 + P1-7 (βλ. docs/AUDIT.md Φάσεις 1–11)
-□ Merge hardening/audit-p0-p2 → master
-□ Pilot smoke: make health · make test · demo chat με tool call
-□ Deploy trial (docs/DEPLOY.md) με REQUIRE_AUTH=true, DRY_RUN=true
+☑ Hardening P0–P2 + P1-7 (AUDIT Φάσεις 1–11) · merge → master
+☑ Pilot scripts + .env.prod.example · local smoke OK
+☑ Latency A+B+E · Codex max_time_limit handling · chat timestamps (Φάση 12)
+□ Deploy trial host (docs/DEPLOY.md) REQUIRE_AUTH=true, DRY_RUN=true
+□ True token streaming (perceived speed) — optional next
 □ Μετά pilot: Phase 2 — multi-tenant / billing · P3-2 knowledge isolation
-□ UI knowledge screen μόνο όταν ζητηθεί (όχι drive-by redesign)
+□ UI knowledge screen μόνο όταν ζητηθεί
 ```
 
 ---

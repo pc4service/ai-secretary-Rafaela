@@ -1,6 +1,6 @@
 # Rafaela AI Secretary — Ανακεφαλαίωση & Επαγγελματικό Roadmap
 
-**Έκδοση εγγράφου:** 1.3  
+**Έκδοση εγγράφου:** 1.4  
 **Ημερομηνία:** 21 Αυγούστου 2026  
 **Στόχος:** Από trial prototype → πλήρες, παρουσιάσιμο και εμπορεύσιμο προϊόν για εταιρική χρήση.
 
@@ -8,10 +8,10 @@
 
 ---
 
-## Πρόοδος υλοποίησης (ενημέρωση 21 Αυγούστου 2026)
+## Πρόοδος υλοποίησης (ενημέρωση 21 Αυγούστου 2026 — βράδυ)
 
 Κατάσταση **από το πραγματικό tree**. Root: `C:\DEVELOP\ai-secretary`.
-Λεπτομέρειες hardening: `docs/AUDIT.md` (Φάσεις 1–11 · P0/P1/P2 κλειστά).
+Λεπτομέρειες: `docs/AUDIT.md` (Φάσεις 1–12 · hardening + latency A+B+E + chat timing).
 
 **Γρήγορη εκκίνηση**
 
@@ -28,10 +28,11 @@ docker compose up --build
 |---|---------|-----------|----------|
 | 1 | Login (Demo / Google / MS identity) | ✅ | `api_auth.py` · cookie session |
 | 2 | Integration OAuth MS365 + Google | ✅ | Silent refresh MS · mail **read-only** · validated OAuth state |
-| 3 | ChatGPT / Codex OAuth (Settings) | ✅ | in-process `CodexOAuthChatGenerator` · **όχι** public HTTP shim |
+| 3 | ChatGPT / Codex OAuth (Settings) | ✅ | in-process · reasoning effort low · incomplete failover |
 | 4 | LLM failover + timeout | ✅ | `llm_router.py` |
 | 5 | HITL + DRY_RUN | ✅ | owner-scoped actions · email send blocked |
-| 6 | Streaming + onboarding + sidebar | ✅ | Phase 3 UI |
+| 6 | Streaming + onboarding + sidebar | ✅ | + chat start/end/duration timestamps |
+| 6b | Agent latency A+B+E | ✅ | intent router · filtered tools · max steps |
 | 7 | Knowledge **keyword** RAG | ✅ | `knowledge/*.md` + `search_knowledge` |
 | 8 | Knowledge **semantic** (Qdrant) | ✅ | compose `qdrant` + hybrid + incremental index |
 | 9 | `REQUIRE_AUTH` + per-user isolation | ✅ | production always-on · conversations/actions IDOR closed |
@@ -523,12 +524,10 @@ python scripts/index_knowledge.py --path knowledge/ --recreate
 ## Επόμενη άμεση ενέργεια (21 Αυγούστου 2026)
 
 ```text
-☑ Hardening P0–P2 + P1-7 (βλ. docs/AUDIT.md Φάσεις 1–11)
-□ Merge hardening/audit-p0-p2 → master
-□ Pilot smoke: make health · make test · demo chat με tool call
-□ Deploy trial (docs/DEPLOY.md) με REQUIRE_AUTH=true, DRY_RUN=true
-□ Μετά pilot: Phase 2 — multi-tenant / billing · P3-2 knowledge isolation
-□ UI knowledge screen μόνο όταν ζητηθεί (όχι drive-by redesign)
+☑ Hardening + merge master + pilot scripts
+☑ Latency A+B+E · Codex max_time_limit · chat timestamps (AUDIT Φάση 12)
+□ Deploy trial host (docs/DEPLOY.md)
+□ Μετά pilot: Phase 2 multi-tenant / P3-2 knowledge isolation
 ```
 
 ---

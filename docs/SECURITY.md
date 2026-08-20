@@ -18,6 +18,7 @@
 | Agent identity | Το LLM δεν επιλέγει `user_id` — δένεται server-side ανά run (`services/agent_context.py`) |
 | Mail read-only | 3 στρώματα: tools εκτός agent · scopes χωρίς `Mail.Send`/`gmail.send` · `BLOCKED_ACTION_TYPES` στον executor |
 | No token relay | ChatGPT OAuth καλείται in-process — **δεν** υπάρχει δημόσιο `/internal/codex` HTTP shim |
+| Codex resilience | `OPENAI_OAUTH_REASONING_EFFORT=low` · incomplete/`max_time_limit` → failover backup LLM |
 | Prompt injection | Ανακτημένο περιεχόμενο (web, knowledge, emails) πλαισιώνεται ως δεδομένα· forged delimiters αφαιρούνται (`services/untrusted.py`) |
 | Audit | `audit_logs` για chat, OAuth, resolve actions, knowledge index |
 | Data minimization | Tools ζητούν μόνο ό,τι χρειάζεται |

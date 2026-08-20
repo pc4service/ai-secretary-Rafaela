@@ -6,11 +6,12 @@ Professional AI Executive Secretary powered by **Haystack**, **Firecrawl**, Micr
 
 - **Rafaela** – bilingual (Greek/English) AI secretary
 - **Microsoft 365** & **Google Workspace** (OAuth · Mail **read-only** · Calendar HITL)
-- **ChatGPT OAuth** – Sign in with ChatGPT from Settings (in-process Codex path, no public relay)
+- **ChatGPT OAuth** – Sign in with ChatGPT from Settings (in-process Codex · no public relay · `OPENAI_OAUTH_REASONING_EFFORT=low`)
 - **Knowledge RAG** – templates in `knowledge/` (keyword always · semantic/hybrid with Qdrant)
 - **Human-in-the-loop** – calendar / knowledge writes require approval
 - **Conversation memory** – PostgreSQL + sidebar
-- **Streaming chat** (SSE) + onboarding wizard
+- **Streaming chat** (SSE) + onboarding · **timestamps** (start / answer / duration, Europe/Athens)
+- **Faster agent path** – intent router (simple vs tools), filtered tools, `AGENT_MAX_STEPS`
 - Encrypted OAuth tokens, audit log, shared rate limit, `DRY_RUN=true` by default
 - **`REQUIRE_AUTH`** – session isolation on actions/conversations (always on in production)
 
@@ -37,6 +38,7 @@ docker compose up --build
 ## Architecture highlights
 
 - Tokens stored encrypted in `oauth_tokens`
+- Intent router (`services/intent_router.py`) before full tool agent
 - Conversations + messages in DB for memory
 - `pending_actions` table for HITL workflow
 - `audit_logs` for every significant event

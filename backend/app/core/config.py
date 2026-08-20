@@ -29,6 +29,12 @@ class Settings(BaseSettings):
     LLM_MODEL: str = "gpt-4o-mini"
     LLM_TIMEOUT_SECONDS: float = 20.0
 
+    # --- Agent latency (intent router A+B+E) ---
+    # Cap Haystack agent LLM↔tool loops (each step = 1 generator call + its tools).
+    AGENT_MAX_STEPS: int = 4
+    # Rule-based router: simple chit-chat skips tools; domain turns get a filtered set.
+    AGENT_INTENT_ROUTER: bool = True
+
     # --- Multi-provider failover (tokens / credits resilience) ---
     # Explicit chain (optional). Format:
     #   name|model|base_url|ENV_VAR_NAME;name2|model2|base_url2|ENV_VAR2
@@ -54,6 +60,8 @@ class Settings(BaseSettings):
     # ChatGPT / Codex OAuth (Sign in with ChatGPT) — no Platform API key required
     OPENAI_OAUTH_REDIRECT_URI: str = "http://localhost:1455/auth/callback"
     OPENAI_OAUTH_MODEL: str = "gpt-5.5"
+    # low|medium|high|minimal — lower effort avoids Codex "Response incomplete: max_time_limit"
+    OPENAI_OAUTH_REASONING_EFFORT: str = "low"
 
     # Firecrawl
     FIRECRAWL_API_KEY: Optional[str] = None

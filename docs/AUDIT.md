@@ -613,4 +613,43 @@ make test   # περιλαμβάνει test_internal_codex_route_is_gone
 |---|----------|------|-----------|
 | P3-2 | P3 | `knowledge/` κοινό για όλους — όχι per-tenant | ⬜ open (μετά pilot) |
 
-**P0/P1/P2 του audit: κλειστά.** Επόμενο βήμα προϊόντος: merge → `master`, pilot.
+**P0/P1/P2 του audit: κλειστά.** Merge στο `master` έγινε · pilot scripts έτοιμα.
+
+---
+
+## Φάση 12 — 2026-08-21 · Latency (A+B+E) + Codex incomplete + chat timing UI
+
+### P1 — Agent latency
+
+| # | Αλλαγή | Αρχεία |
+|---|--------|--------|
+| A | Rule-based **intent router** — chit-chat χωρίς tools (1 LLM step) | `services/intent_router.py` |
+| B | **Filtered tools** ανά domain (knowledge / mail / cal / web / gdpr) | `intent_router.py` + `secretary_agent.py` |
+| E | **`AGENT_MAX_STEPS`** (default 4) στο Haystack `Agent` | `core/config.py`, `secretary_agent.py` |
+
+Env: `AGENT_INTENT_ROUTER=true`, `AGENT_MAX_STEPS=4`.
+
+Baseline (local, `kimi-k3`): simple ~12s · knowledge ~25–28s.  
+Στόχος μετά A+B+E: simple ~4–7s · knowledge ~12–20s (εξαρτάται από provider).
+
+### P1 — Codex `Response incomplete: max_time_limit`
+
+Το ChatGPT/Codex Responses API κόβει βαρύ reasoning. Δεν είναι HTTP timeout δικό μας.
+
+| Αλλαγή | Αποτέλεσμα |
+|--------|------------|
+| Parse `response.incomplete` | Λόγος `max_time_limit` |
+| Partial text/tool_calls | Χρήση αντί για κενό fail |
+| Κενό incomplete → `ValueError` | Failover στο backup LLM |
+| `OPENAI_OAUTH_REASONING_EFFORT=low` | Λιγότερο reasoning |
+| Failover markers | `max_time_limit` / `response incomplete` |
+
+### P3 — Chat UX timing
+
+Κάτω από κάθε απάντηση: **Έναρξη agent** · **Απάντηση** (ημ/νία-ώρα Europe/Athens) · **Διάρκεια**.  
+Κατά τη διάρκεια: live elapsed στο status. (`frontend/src/components/Chat.tsx`)
+
+### Tests
+
+- `tests/test_intent_router.py`
+- `tests/test_codex_incomplete.py`

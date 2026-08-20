@@ -182,10 +182,23 @@ def _default_tools() -> List:
     ]
 
 
+# Shorter system text for no-tool turns — less prompt overhead on simple path.
+SIMPLE_SYSTEM_PROMPT = """
+You are "Rafaela", a professional AI Executive Secretary (female, bilingual EL/EN).
+Answer the user directly and concisely. Match their language (Greek → Greek).
+You have no tools on this turn. Do not claim you checked email, calendar, or the web.
+If they need live data or a write action, say briefly that you can do it on the next request.
+Stay in role: secretary / productivity, not a general chatbot.
+""".strip()
+
+
 def create_secretary_agent(
     tools: Optional[List] = None,
     streaming_callback=None,
     chat_generator=None,
+    *,
+    system_prompt: Optional[str] = None,
+    max_agent_steps: Optional[int] = None,
 ) -> Agent:
     """Build Rafaela agent. Prefer run_agent() so LLM failover is applied."""
     if tools is None:
@@ -202,11 +215,17 @@ def create_secretary_agent(
             )
         chat_generator = build_chat_generator(endpoints[0])
 
+    steps = max_agent_steps if max_agent_steps is not None else int(
+        getattr(settings, "AGENT_MAX_STEPS", 4) or 4
+    )
+    steps = max(1, min(steps, 20))
+
     return Agent(
         chat_generator=chat_generator,
         tools=tools,
-        system_prompt=SECRETARY_SYSTEM_PROMPT,
+        system_prompt=system_prompt or SECRETARY_SYSTEM_PROMPT,
         streaming_callback=streaming_callback,
+        max_agent_steps=steps,
     )
 
 
@@ -218,6 +237,7 @@ async def run_agent(
 ) -> Dict[str, Any]:
     """Run the agent with multi-provider LLM failover (credits / 429 / 5xx)."""
     from app.services.agent_context import set_agent_user
+    from app.services.intent_router import TOOL_GROUPS, filter_tools, route_intent
 
     # Bind the acting user so tools act as the session user, never as a
     # model-supplied id. Must happen before any tool can run.
@@ -229,7 +249,31 @@ async def run_agent(
     from app.services.llm_router import run_with_llm_failover
     from app.services.token_store import get_fresh_openai_tokens, ReconnectRequired
 
-    tools = _default_tools()
+    router_on = bool(getattr(settings, "AGENT_INTENT_ROUTER", True))
+    decision = route_intent(messages, enabled=router_on)
+    all_tools = _default_tools()
+    if decision.mode == "simple":
+        tools: List = []
+        system_prompt = SIMPLE_SYSTEM_PROMPT
+        max_steps = 1
+    else:
+        names = decision.tool_names if router_on else None
+        tools = filter_tools(all_tools, names)
+        # Safety: never run a domain turn with zero tools if filtering failed.
+        if not tools:
+            tools = filter_tools(all_tools, list(TOOL_GROUPS["core"])) or all_tools
+        system_prompt = SECRETARY_SYSTEM_PROMPT
+        max_steps = int(getattr(settings, "AGENT_MAX_STEPS", 4) or 4)
+
+    logger.info(
+        "agent_route",
+        mode=decision.mode,
+        reason=decision.reason,
+        groups=sorted(decision.groups),
+        tools=[(getattr(t, "tool_spec", {}) or {}).get("name") for t in tools],
+        max_steps=max_steps,
+    )
+
     oauth_token = None
     try:
         oauth_token = (await get_fresh_openai_tokens(user_id)).get("access_token")
@@ -243,14 +287,32 @@ async def run_agent(
             tools=tools,
             streaming_callback=streaming_callback,
             chat_generator=generator,
+            system_prompt=system_prompt,
+            max_agent_steps=max_steps,
         )
         return ag.run(messages=messages)
 
     result, endpoint = run_with_llm_failover(
         _once, operation="run_agent", access_token=oauth_token
     )
-    logger.info("agent_completed", llm=endpoint.name, model=endpoint.model)
+    logger.info(
+        "agent_completed",
+        llm=endpoint.name,
+        model=endpoint.model,
+        mode=decision.mode,
+        reason=decision.reason,
+        steps=(result or {}).get("step_count") if isinstance(result, dict) else None,
+    )
     # Attach which provider served the reply (for UI/debug; harmless extra key)
     if isinstance(result, dict):
-        result = {**result, "_llm_provider": endpoint.name, "_llm_model": endpoint.model}
+        result = {
+            **result,
+            "_llm_provider": endpoint.name,
+            "_llm_model": endpoint.model,
+            "_route_mode": decision.mode,
+            "_route_reason": decision.reason,
+            "_route_tools": [
+                (getattr(t, "tool_spec", {}) or {}).get("name") for t in tools
+            ],
+        }
     return result

@@ -89,7 +89,7 @@ Classic chat: `POST /api/v1/chat` still available.
 
 | Στρώμα | Τεχνολογία |
 |--------|------------|
-| Agent / Orchestration | Haystack 3.x (`Agent` + tools) |
+| Agent / Orchestration | Haystack 3.x (`Agent` + tools) · intent router · `AGENT_MAX_STEPS` |
 | Web research | Firecrawl |
 | Backend API | FastAPI + Uvicorn |
 | Auth integrations | MSAL (Microsoft), google-auth (Google) |
@@ -107,7 +107,7 @@ Classic chat: `POST /api/v1/chat` still available.
 ai-secretary/
 ├── backend/
 │   ├── app/
-│   │   ├── agent/secretary_agent.py   # Haystack Agent + Rafaela system prompt
+│   │   ├── agent/secretary_agent.py   # Haystack Agent + route + max_steps
 │   │   ├── core/config.py             # Settings από .env
 │   │   ├── core/security.py           # Fernet encrypt/decrypt
 │   │   ├── models/database.py         # User, OAuthToken, PendingAction,
@@ -115,9 +115,10 @@ ai-secretary/
 │   │   ├── services/
 │   │   │   ├── microsoft.py           # MS Graph Mail + Calendar
 │   │   │   ├── google.py              # Gmail + Google Calendar
-│   │   │   ├── openai_oauth.py        # ChatGPT / Codex OAuth
+│   │   │   ├── openai_oauth.py        # ChatGPT / Codex OAuth (+ incomplete)
 │   │   │   ├── llm_router.py          # multi-provider failover
-│   │   │   ├── knowledge.py           # keyword RAG (Qdrant stub)
+│   │   │   ├── intent_router.py       # simple vs tools · tool groups
+│   │   │   ├── knowledge.py           # keyword + hybrid RAG
 │   │   │   ├── token_store.py
 │   │   │   ├── pending_actions.py
 │   │   │   ├── conversation.py
@@ -157,6 +158,14 @@ ai-secretary/
 ## 5. Βασικές Δυνατότητες
 
 ### Agent (Rafaela)
+
+Πριν το full tool loop τρέχει **intent router** (`intent_router.py`):
+- **simple** — χαιρετισμοί / identity → χωρίς tools, `max_steps=1`
+- **agent** — φιλτραρισμένα tools (knowledge, mail, calendar, web, gdpr) + `AGENT_MAX_STEPS`
+
+Chat UI: κάτω από κάθε απάντηση φαίνονται **έναρξη**, **ώρα απάντησης** και **διάρκεια** (Europe/Athens).
+
+### Agent (Rafaela) — ρόλος
 - Bilingual (Ελληνικά πρώτα αν ο χρήστης γράφει ελληνικά)
 - Calendar list / propose create event
 - Email **list only** (send tools not registered)
@@ -234,6 +243,12 @@ cp .env.example .env
 
 ```env
 OPENAI_API_KEY=sk-...
+# ChatGPT OAuth (Settings) — low effort αποφεύγει max_time_limit
+OPENAI_OAUTH_MODEL=gpt-5.5
+OPENAI_OAUTH_REASONING_EFFORT=low
+# Agent latency
+AGENT_INTENT_ROUTER=true
+AGENT_MAX_STEPS=4
 # Προαιρετικά:
 FIRECRAWL_API_KEY=fc-...
 MS_CLIENT_ID=...
@@ -335,9 +350,11 @@ make shell     # shell στο backend container
 1. ~~Semantic RAG (Qdrant)~~ ✅  
 2. ~~`REQUIRE_AUTH` + isolation~~ ✅ (βλ. `docs/AUDIT.md`)  
 3. ~~Unit/guard tests + CI~~ ✅ (`make test`)  
-4. Merge hardening → `master` + pilot deploy  
-5. Πραγματικό GDPR JSON export στο UI  
-6. Multi-tenant / billing / per-tenant knowledge **μετά** τον πρώτο pilot  
+4. ~~Merge hardening → `master`~~ ✅ · pilot scripts ✅  
+5. ~~Agent latency A+B+E + Codex incomplete handling + chat timing~~ ✅ (AUDIT Φάση 12)  
+6. Deploy trial host + true token streaming (optional)  
+7. Πραγματικό GDPR JSON export στο UI  
+8. Multi-tenant / billing / per-tenant knowledge **μετά** τον πρώτο pilot  
 
 Graphify / ECC / UI-UX Pro Max: skills του coding assistant — δεν μπαίνουν ως runtime της Rafaela.
 

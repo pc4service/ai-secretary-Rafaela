@@ -18,7 +18,41 @@ type Message = {
   pendingActionId?: string | null;
   actionResolved?: string;
   streaming?: boolean;
+  /** When the user sent / agent started working (ms epoch) */
+  startedAt?: number | null;
+  /** When the assistant finished (ms epoch) */
+  finishedAt?: number | null;
+  /** Wall time for the reply in ms */
+  durationMs?: number | null;
 };
+
+function formatDateTime(ms?: number | null): string {
+  if (ms == null || !Number.isFinite(ms)) return "—";
+  try {
+    return new Date(ms).toLocaleString("el-GR", {
+      timeZone: "Europe/Athens",
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    });
+  } catch {
+    return new Date(ms).toISOString();
+  }
+}
+
+function formatDuration(ms?: number | null): string {
+  if (ms == null || !Number.isFinite(ms) || ms < 0) return "—";
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  const sec = ms / 1000;
+  if (sec < 60) return `${sec.toFixed(sec < 10 ? 1 : 0)} δευτ.`;
+  const m = Math.floor(sec / 60);
+  const s = Math.round(sec % 60);
+  return `${m} λεπ. ${s} δευτ.`;
+}
 
 type Props = {
   /** Controlled conversation from parent; if omitted, local state is used */
@@ -49,6 +83,7 @@ export default function Chat({
       role: "assistant",
       content:
         "Γεια σου! Είμαι η Rafaela, η AI Executive Secretary σου. Πώς μπορώ να σε βοηθήσω σήμερα; Μπορώ να διαχειριστώ ημερολόγιο, emails, tasks και έρευνα – πάντα με σεβασμό στο GDPR και με επιβεβαίωση πριν από κάθε σημαντική ενέργεια.",
+      finishedAt: Date.now(),
     },
   ]);
   const [input, setInput] = useState("");
@@ -56,11 +91,20 @@ export default function Chat({
   const [status, setStatus] = useState<string | null>(null);
   const [resolving, setResolving] = useState<string | null>(null);
   const [sidebarKey, setSidebarKey] = useState(0);
+  /** Forces re-render while streaming so elapsed time updates live. */
+  const [, setTick] = useState(0);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const runStartedAtRef = useRef<number | null>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, status]);
+
+  useEffect(() => {
+    if (!loading) return;
+    const id = window.setInterval(() => setTick((n) => n + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [loading]);
 
   // Load history when selecting an existing conversation
   useEffect(() => {
@@ -71,11 +115,19 @@ export default function Chat({
         const rows = await getConversationMessages(conversationId);
         if (cancelled || !Array.isArray(rows) || rows.length === 0) return;
         setMessages(
-          rows.map((m: any) => ({
-            role: m.role === "assistant" ? "assistant" : "user",
-            content: m.content,
-            pendingActionId: m.pending_action_id || null,
-          }))
+          rows.map((m: any) => {
+            const ts = m.created_at ? Date.parse(m.created_at) : NaN;
+            const at = Number.isFinite(ts) ? ts : null;
+            return {
+              role: (m.role === "assistant" ? "assistant" : "user") as
+                | "assistant"
+                | "user",
+              content: m.content,
+              pendingActionId: m.pending_action_id || null,
+              startedAt: at,
+              finishedAt: at,
+            };
+          })
         );
       } catch {
         /* keep welcome */
@@ -91,16 +143,23 @@ export default function Chat({
     const text = input.trim();
     if (!text || loading) return;
 
-    const userMsg: Message = { role: "user", content: text };
+    const startedAt = Date.now();
+    runStartedAtRef.current = startedAt;
+    const userMsg: Message = { role: "user", content: text, startedAt, finishedAt: startedAt };
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
     setLoading(true);
-    setStatus("Σύνδεση…");
+    setStatus(`Σύνδεση… · ${formatDateTime(startedAt)}`);
 
     // Placeholder assistant bubble for streaming
     setMessages((prev) => [
       ...prev,
-      { role: "assistant", content: "", streaming: true },
+      {
+        role: "assistant",
+        content: "",
+        streaming: true,
+        startedAt,
+      },
     ]);
 
     const history = messages
@@ -108,8 +167,35 @@ export default function Chat({
       .map((m) => ({ role: m.role, content: m.content }));
 
     try {
+    const finishAssistant = (patch: Partial<Message>) => {
+      const finishedAt = Date.now();
+      const start = runStartedAtRef.current ?? startedAt;
+      const durationMs = Math.max(0, finishedAt - start);
+      setMessages((prev) => {
+        const next = [...prev];
+        const last = next[next.length - 1];
+        if (last?.role === "assistant") {
+          next[next.length - 1] = {
+            ...last,
+            ...patch,
+            startedAt: last.startedAt ?? start,
+            finishedAt,
+            durationMs,
+            streaming: false,
+          };
+        }
+        return next;
+      });
+      return { finishedAt, durationMs, start };
+    };
+
+    try {
       await streamChat(text, history, conversationId, {
-        onStatus: (msg) => setStatus(msg),
+        onStatus: (msg) => {
+          const start = runStartedAtRef.current ?? startedAt;
+          const elapsed = Date.now() - start;
+          setStatus(`${msg} · από ${formatDateTime(start)} · ${formatDuration(elapsed)}`);
+        },
         onDelta: (chunk) => {
           setStatus(null);
           setMessages((prev) => {
@@ -129,65 +215,26 @@ export default function Chat({
             setConversationId(data.conversation_id);
             setSidebarKey((k) => k + 1);
           }
-          setMessages((prev) => {
-            const next = [...prev];
-            const last = next[next.length - 1];
-            if (last?.role === "assistant") {
-              next[next.length - 1] = {
-                role: "assistant",
-                content:
-                  data.reply || last.content || "Δεν μπόρεσα να απαντήσω.",
-                pendingActionId: data.pending_action_id || null,
-                streaming: false,
-              };
-            }
-            return next;
+          finishAssistant({
+            content: data.reply || "Δεν μπόρεσα να απαντήσω.",
+            pendingActionId: data.pending_action_id || null,
           });
           if (data.pending_action_id) onPendingChange?.();
           setStatus(null);
         },
         onError: (message) => {
-          setMessages((prev) => {
-            const next = [...prev];
-            const last = next[next.length - 1];
-            if (last?.role === "assistant" && last.streaming) {
-              next[next.length - 1] = {
-                role: "assistant",
-                content: `Σφάλμα: ${message}`,
-                streaming: false,
-              };
-            } else {
-              next.push({
-                role: "assistant",
-                content: `Σφάλμα: ${message}`,
-              });
-            }
-            return next;
-          });
+          finishAssistant({ content: `Σφάλμα: ${message}` });
           setStatus(null);
         },
       });
     } catch (err: any) {
-      setMessages((prev) => {
-        const next = [...prev];
-        const last = next[next.length - 1];
-        if (last?.role === "assistant" && last.streaming) {
-          next[next.length - 1] = {
-            role: "assistant",
-            content: `Σφάλμα: ${err.message}. Βεβαιώσου ότι το backend τρέχει και έχει OPENAI_API_KEY.`,
-            streaming: false,
-          };
-        } else {
-          next.push({
-            role: "assistant",
-            content: `Σφάλμα: ${err.message}`,
-          });
-        }
-        return next;
+      finishAssistant({
+        content: `Σφάλμα: ${err.message}. Βεβαιώσου ότι το backend τρέχει και έχει OPENAI_API_KEY.`,
       });
       setStatus(null);
     } finally {
       setLoading(false);
+      runStartedAtRef.current = null;
     }
   }
 
@@ -235,6 +282,7 @@ export default function Chat({
         {
           role: "assistant",
           content: "Νέα συνομιλία. Πώς μπορώ να σε βοηθήσω;",
+          finishedAt: Date.now(),
         },
       ]);
     }
@@ -304,6 +352,42 @@ export default function Chat({
                     <p className="whitespace-pre-wrap">{m.content}</p>
                   )}
                 </div>
+                {/* Timestamps: start when agent begins · finish + duration under reply */}
+                {m.role === "user" && m.startedAt != null && (
+                  <p className="text-[10px] text-slate-400 px-1 text-right">
+                    {formatDateTime(m.startedAt)}
+                  </p>
+                )}
+                {m.role === "assistant" && (
+                  <div className="text-[10px] text-slate-400 px-1 space-y-0.5">
+                    {m.startedAt != null && (
+                      <p>
+                        <span className="text-slate-500">Έναρξη agent:</span>{" "}
+                        {formatDateTime(m.startedAt)}
+                        {m.streaming && (
+                          <span className="ml-2 text-amber-600 dark:text-amber-400">
+                            · σε εξέλιξη… {formatDuration(Date.now() - m.startedAt)}
+                          </span>
+                        )}
+                      </p>
+                    )}
+                    {!m.streaming && m.finishedAt != null && (
+                      <p>
+                        <span className="text-slate-500">Απάντηση:</span>{" "}
+                        {formatDateTime(m.finishedAt)}
+                        {m.durationMs != null && (
+                          <>
+                            {" "}
+                            <span className="text-slate-500">· Διάρκεια:</span>{" "}
+                            <span className="font-medium text-slate-600 dark:text-slate-300">
+                              {formatDuration(m.durationMs)}
+                            </span>
+                          </>
+                        )}
+                      </p>
+                    )}
+                  </div>
+                )}
                 {m.pendingActionId && !m.actionResolved && (
                   <div className="flex gap-2 pl-1">
                     <button
@@ -339,7 +423,8 @@ export default function Chat({
           ))}
           {status && (
             <p className="text-xs text-slate-400 flex items-center gap-2 px-2">
-              <Loader2 size={12} className="animate-spin" /> {status}
+              <Loader2 size={12} className="animate-spin flex-shrink-0" />
+              <span>{status}</span>
             </p>
           )}
           <div ref={bottomRef} />

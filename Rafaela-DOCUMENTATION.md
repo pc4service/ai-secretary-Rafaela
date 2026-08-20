@@ -333,11 +333,12 @@ make shell     # shell στο backend container
 ## 11. Επόμενα Βήματα
 
 1. ~~Semantic RAG (Qdrant)~~ ✅  
-2. ~~`REQUIRE_AUTH` + isolation~~ ✅ (βλ. `docs/AUDIT.md`)  
-3. ~~Unit/guard tests + CI~~ ✅ (`make test`)  
-4. Merge hardening → `master` + pilot deploy  
-5. Πραγματικό GDPR JSON export στο UI  
-6. Multi-tenant / billing / per-tenant knowledge **μετά** τον πρώτο pilot  
+2. ~~`REQUIRE_AUTH` + isolation~~ ✅  
+3. ~~Unit/guard tests + CI~~ ✅  
+4. ~~Merge hardening + pilot scripts~~ ✅  
+5. ~~Latency A+B+E + Codex incomplete + chat timing~~ ✅ (`docs/AUDIT.md` Φάση 12)  
+6. Deploy trial host · optional true streaming  
+7. GDPR export UI · multi-tenant μετά pilot  
 
 
 Graphify / ECC / UI-UX Pro Max: skills του coding assistant — δεν μπαίνουν ως runtime της Rafaela.

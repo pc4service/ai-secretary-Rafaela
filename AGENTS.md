@@ -99,6 +99,10 @@ Configured via `.env` + runtime OAuth:
 
 When changing LLM code: verify a chat turn that **calls a tool** (e.g. emails or `search_knowledge`), not only plain text.
 
+**Latency path:** `services/intent_router.py` + `AGENT_MAX_STEPS` / `AGENT_INTENT_ROUTER`.
+Simple chit-chat must not load the full tool schema. Codex incomplete/`max_time_limit`
+must failover (`OPENAI_OAUTH_REASONING_EFFORT=low` recommended).
+
 ---
 
 ## Integrations

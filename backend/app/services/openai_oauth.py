@@ -172,13 +172,42 @@ def _extract_output_text(payload: Dict[str, Any]) -> str:
     return ""
 
 
-def _parse_codex_sse(raw: str) -> tuple[str, str, list[dict[str, Any]]]:
-    """Parse Codex Responses SSE → (response_id, assistant_text, tool_calls)."""
+def _parse_codex_sse(raw: str) -> tuple[str, str, list[dict[str, Any]], Optional[str]]:
+    """Parse Codex Responses SSE → (response_id, text, tool_calls, incomplete_reason)."""
     response_id = "codex-oauth"
     text_parts: list[str] = []
     final_text = ""
+    incomplete_reason: Optional[str] = None
     # call_id / item_id → accumulating tool call
     tool_by_id: Dict[str, Dict[str, Any]] = {}
+
+    def _harvest_response(resp: dict) -> None:
+        nonlocal response_id, final_text, incomplete_reason
+        if resp.get("id"):
+            response_id = str(resp["id"])
+        status = str(resp.get("status") or "")
+        if status == "incomplete":
+            details = resp.get("incomplete_details") or {}
+            if isinstance(details, dict):
+                incomplete_reason = str(details.get("reason") or "incomplete")
+            else:
+                incomplete_reason = "incomplete"
+        extracted = _extract_output_text(resp)
+        if extracted:
+            final_text = extracted
+        for item in resp.get("output") or []:
+            if not isinstance(item, dict):
+                continue
+            if item.get("type") == "function_call":
+                cid = item.get("call_id") or item.get("id") or ""
+                tool_by_id[str(cid)] = {
+                    "id": str(cid),
+                    "type": "function",
+                    "function": {
+                        "name": item.get("name") or "",
+                        "arguments": item.get("arguments") or "{}",
+                    },
+                }
 
     for block in raw.split("\n\n"):
         data_lines = [
@@ -199,28 +228,28 @@ def _parse_codex_sse(raw: str) -> tuple[str, str, list[dict[str, Any]]]:
             continue
 
         etype = event.get("type") or ""
-        if etype in ("response.created", "response.completed", "response.in_progress"):
+        if etype in (
+            "response.created",
+            "response.completed",
+            "response.in_progress",
+            "response.incomplete",
+            "response.failed",
+        ):
             resp = event.get("response") or {}
-            if isinstance(resp, dict) and resp.get("id"):
-                response_id = str(resp["id"])
-            if etype == "response.completed" and isinstance(resp, dict):
-                extracted = _extract_output_text(resp)
-                if extracted:
-                    final_text = extracted
-                # Also harvest completed function_call items from final payload
-                for item in resp.get("output") or []:
-                    if not isinstance(item, dict):
-                        continue
-                    if item.get("type") == "function_call":
-                        cid = item.get("call_id") or item.get("id") or ""
-                        tool_by_id[str(cid)] = {
-                            "id": str(cid),
-                            "type": "function",
-                            "function": {
-                                "name": item.get("name") or "",
-                                "arguments": item.get("arguments") or "{}",
-                            },
-                        }
+            if isinstance(resp, dict):
+                if resp.get("id"):
+                    response_id = str(resp["id"])
+                if etype in ("response.completed", "response.incomplete", "response.failed"):
+                    _harvest_response(resp)
+                # Some streams only set status on the event wrapper
+                if etype == "response.incomplete" and not incomplete_reason:
+                    incomplete_reason = "max_time_limit"
+                if etype == "response.failed":
+                    err = event.get("response") or event.get("error") or {}
+                    if isinstance(err, dict):
+                        incomplete_reason = str(
+                            err.get("code") or err.get("message") or "failed"
+                        )[:120]
         elif etype == "response.output_text.delta":
             delta = event.get("delta")
             if isinstance(delta, str) and delta:
@@ -302,7 +331,7 @@ def _parse_codex_sse(raw: str) -> tuple[str, str, list[dict[str, Any]]]:
                 "function": {"name": name, "arguments": args},
             }
         )
-    return response_id, text, tool_calls
+    return response_id, text, tool_calls, incomplete_reason
 
 
 def _messages_to_responses_input(messages: list) -> tuple[Optional[str], list]:
@@ -431,8 +460,13 @@ async def codex_chat_completion(
         if tool_choice is not None:
             body["tool_choice"] = tool_choice
 
-    # gpt-5.5 reasoning can exceed the short default LLM timeout
-    timeout = max(float(settings.LLM_TIMEOUT_SECONDS or 20), 120.0)
+    # Reasoning models may hit OpenAI *server* max_time_limit; keep client timeout higher.
+    timeout = max(float(settings.LLM_TIMEOUT_SECONDS or 20), 180.0)
+    # Lower reasoning effort reduces incomplete/max_time_limit on gpt-5.x (when supported).
+    effort = (getattr(settings, "OPENAI_OAUTH_REASONING_EFFORT", None) or "").strip().lower()
+    if effort in ("low", "medium", "high", "minimal"):
+        body["reasoning"] = {"effort": effort}
+
     headers = oauth_headers(access_token)
     headers["Accept"] = "text/event-stream"
 
@@ -448,7 +482,25 @@ async def codex_chat_completion(
             f"ChatGPT OAuth request failed ({res.status_code}): {res.text[:200]}"
         )
 
-    response_id, text, tool_calls = _parse_codex_sse(res.text)
+    response_id, text, tool_calls, incomplete_reason = _parse_codex_sse(res.text)
+
+    # Server cut the run short (common with heavy reasoning + many tools).
+    if incomplete_reason:
+        logger.warning(
+            "codex_response_incomplete",
+            reason=incomplete_reason,
+            has_text=bool((text or "").strip()),
+            tool_calls=len(tool_calls or []),
+            model=model,
+        )
+        # Prefer partial tool calls / text so the agent can continue when possible.
+        if not (text or "").strip() and not tool_calls:
+            # Failoverable — llm_router treats "timeout" / incomplete as retryable.
+            raise ValueError(
+                f"Response incomplete: {incomplete_reason}. "
+                "Try OPENAI_OAUTH_REASONING_EFFORT=low, fewer tools, or a backup LLM."
+            )
+
     message: Dict[str, Any] = {"role": "assistant", "content": text or (None if tool_calls else " ")}
     if tool_calls:
         message["tool_calls"] = tool_calls
@@ -456,7 +508,7 @@ async def codex_chat_completion(
     else:
         if not message.get("content"):
             message["content"] = " "
-        finish_reason = "stop"
+        finish_reason = "length" if incomplete_reason else "stop"
 
     return {
         "id": response_id,
@@ -469,4 +521,5 @@ async def codex_chat_completion(
                 "finish_reason": finish_reason,
             }
         ],
+        "_incomplete_reason": incomplete_reason,
     }
