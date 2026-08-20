@@ -47,7 +47,8 @@ GOOGLE_REDIRECT_URI=https://api.rafaela.example.com/api/v1/auth/google/callback
 GOOGLE_LOGIN_REDIRECT_URI=https://api.rafaela.example.com/api/v1/login/google/callback
 MS_LOGIN_REDIRECT_URI=https://api.rafaela.example.com/api/v1/login/microsoft/callback
 COOKIE_SECURE=true
-# QDRANT_URL=http://qdrant:6333   # μόνο όταν προστεθεί qdrant στο compose (Phase 1B)
+TRUSTED_PROXY_HOPS=1
+QDRANT_URL=http://qdrant:6333
 ```
 
 ### 3. Start
@@ -58,7 +59,7 @@ curl -sf http://127.0.0.1:8000/health
 curl -sf http://127.0.0.1:8000/api/v1/knowledge/status
 ```
 
-> **Knowledge σήμερα:** keyword search από `knowledge/*.md`. Το `docker-compose.prod.yml` **δεν** έχει ακόμα υπηρεσία Qdrant· μην βασίζεσαι σε semantic index μέχρι να υλοποιηθεί το Phase 1B.
+> **Knowledge:** keyword πάντα· semantic/hybrid όταν τρέχει το service `qdrant` (υπάρχει στο prod compose). Χωρίς embeddings key πέφτει σε hash embedder / keyword.
 
 ### 4. Cloudflare Tunnel
 
