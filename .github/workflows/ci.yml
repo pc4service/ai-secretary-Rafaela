@@ -13,6 +13,23 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    # test_resolve_ignores_client_supplied_user_id (test_api_guards.py) overrides
+    # auth but still hits resolve_action's real DB lookup for the "not found"
+    # branch, so unlike the rest of that file it is not DB-free. Give it one.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: secretary
+          POSTGRES_PASSWORD: secretary
+          POSTGRES_DB: secretary
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U secretary"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
 
     steps:
       - name: Checkout
@@ -32,6 +49,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Initialize database schema
+        # Guard tests build TestClient(app) without the lifespan context
+        # (deliberately, to skip startup work), so nothing else creates tables.
+        env:
+          DATABASE_URL: postgresql+asyncpg://secretary:secretary@localhost:5432/secretary
+        run: python -c "import asyncio; from app.models.database import init_db; asyncio.run(init_db())"
+
       - name: Run unit tests
         env:
           SECRET_KEY: ci-test-secret-key-not-for-production-use
@@ -42,6 +66,7 @@ jobs:
           # No Qdrant in CI: indexing reports "skipped", keyword search still works.
           QDRANT_URL: ""
           KNOWLEDGE_DIR: ${{ github.workspace }}/knowledge
+          DATABASE_URL: postgresql+asyncpg://secretary:secretary@localhost:5432/secretary
           PYTHONPATH: .
         run: pytest
 
@@ -53,7 +78,12 @@ jobs:
       - name: Install Compose
         run: docker compose version
       - name: Config check (dev)
-        run: docker compose -f docker-compose.yml config --quiet
+        # docker-compose.yml's backend service declares env_file: [.env], and
+        # compose validates that the file exists even for a config-only check.
+        # .env is gitignored (real secrets), so use the committed template.
+        run: |
+          cp .env.example .env
+          docker compose -f docker-compose.yml config --quiet
       - name: Config check (prod)
         run: |
           # Provide required prod vars so interpolation does not fail
