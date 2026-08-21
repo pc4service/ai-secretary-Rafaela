@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   getSettings,
   getMicrosoftAuthUrl,
@@ -9,6 +10,7 @@ import {
   disconnectMicrosoft,
   disconnectGoogle,
   disconnectOpenAI,
+  isUnauthorized,
 } from "@/lib/api";
 import { CheckCircle2, XCircle, Link2, Unlink, Shield, KeyRound, Loader2 } from "lucide-react";
 
@@ -73,11 +75,17 @@ export default function SettingsPanel() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
+  const router = useRouter();
+
   async function load() {
     try {
       const s = await getSettings();
       setData(s);
     } catch (e) {
+      if (isUnauthorized(e)) {
+        router.replace("/login");
+        return;
+      }
       console.error(e);
     } finally {
       setLoading(false);
@@ -94,6 +102,10 @@ export default function SettingsPanel() {
       const { auth_url } = await getMicrosoftAuthUrl();
       window.location.href = auth_url;
     } catch (e: any) {
+      if (isUnauthorized(e)) {
+        router.replace("/login");
+        return;
+      }
       alert(e.message);
     } finally {
       setActionLoading(null);
@@ -106,6 +118,10 @@ export default function SettingsPanel() {
       const { auth_url } = await getGoogleAuthUrl();
       window.location.href = auth_url;
     } catch (e: any) {
+      if (isUnauthorized(e)) {
+        router.replace("/login");
+        return;
+      }
       alert(e.message);
     } finally {
       setActionLoading(null);
@@ -114,16 +130,34 @@ export default function SettingsPanel() {
 
   async function disconnectMs() {
     setActionLoading("ms-disc");
-    await disconnectMicrosoft();
-    await load();
-    setActionLoading(null);
+    try {
+      await disconnectMicrosoft();
+      await load();
+    } catch (e: any) {
+      if (isUnauthorized(e)) {
+        router.replace("/login");
+        return;
+      }
+      alert(e.message);
+    } finally {
+      setActionLoading(null);
+    }
   }
 
-  async function disconnectGoogle() {
+  async function handleDisconnectGoogle() {
     setActionLoading("google-disc");
-    await disconnectGoogle();
-    await load();
-    setActionLoading(null);
+    try {
+      await disconnectGoogle();
+      await load();
+    } catch (e: any) {
+      if (isUnauthorized(e)) {
+        router.replace("/login");
+        return;
+      }
+      alert(e.message);
+    } finally {
+      setActionLoading(null);
+    }
   }
 
   async function connectOpenAI() {
@@ -132,6 +166,10 @@ export default function SettingsPanel() {
       const { auth_url } = await getOpenAIAuthUrl();
       window.location.href = auth_url;
     } catch (e: any) {
+      if (isUnauthorized(e)) {
+        router.replace("/login");
+        return;
+      }
       alert(e.message);
     } finally {
       setActionLoading(null);
@@ -140,9 +178,18 @@ export default function SettingsPanel() {
 
   async function disconnectOpenAi() {
     setActionLoading("openai-disc");
-    await disconnectOpenAI();
-    await load();
-    setActionLoading(null);
+    try {
+      await disconnectOpenAI();
+      await load();
+    } catch (e: any) {
+      if (isUnauthorized(e)) {
+        router.replace("/login");
+        return;
+      }
+      alert(e.message);
+    } finally {
+      setActionLoading(null);
+    }
   }
 
   if (loading) {
@@ -284,7 +331,7 @@ export default function SettingsPanel() {
           <p className="text-sm text-slate-500 mb-4">Gmail & Google Calendar</p>
           {data?.google_connected ? (
             <button
-              onClick={disconnectGoogle}
+              onClick={handleDisconnectGoogle}
               disabled={actionLoading === "google-disc"}
               className="inline-flex items-center gap-2 text-sm text-red-600 hover:text-red-700"
             >

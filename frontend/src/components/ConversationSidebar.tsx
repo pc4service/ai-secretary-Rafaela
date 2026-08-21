@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { listConversations, deleteConversation } from "@/lib/api";
+import { useRouter } from "next/navigation";
+import { listConversations, deleteConversation, isUnauthorized } from "@/lib/api";
 import { MessageSquarePlus, Trash2, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -22,6 +23,7 @@ export default function ConversationSidebar({
   onSelect,
   refreshKey = 0,
 }: Props) {
+  const router = useRouter();
   const [items, setItems] = useState<Conv[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -29,7 +31,11 @@ export default function ConversationSidebar({
     try {
       const data = await listConversations();
       setItems(Array.isArray(data) ? data : []);
-    } catch {
+    } catch (e) {
+      if (isUnauthorized(e)) {
+        router.replace("/login");
+        return;
+      }
       setItems([]);
     } finally {
       setLoading(false);
@@ -48,6 +54,10 @@ export default function ConversationSidebar({
       if (activeId === id) onSelect(null);
       await load();
     } catch (err: any) {
+      if (isUnauthorized(err)) {
+        router.replace("/login");
+        return;
+      }
       alert(err.message);
     }
   }

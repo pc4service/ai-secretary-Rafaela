@@ -1,7 +1,13 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { getPendingActions, getActionHistory, resolveAction } from "@/lib/api";
+import { useRouter } from "next/navigation";
+import {
+  getPendingActions,
+  getActionHistory,
+  resolveAction,
+  isUnauthorized,
+} from "@/lib/api";
 import { Check, X, Loader2, Clock, CheckCircle2, XCircle, AlertCircle, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -45,12 +51,24 @@ function actionTypeLabel(t: string) {
   return map[t] || t;
 }
 
-/** Parse executor result strings like "{'status': 'dry-run', 'message': '…'}". */
+/** Parse executor result strings — real JSON going forward, legacy Python-dict reprs for older rows. */
 function formatResult(raw?: string | null): { dryRun: boolean; text: string } | null {
   if (!raw) return null;
   const text = String(raw);
   const dryRun = /dry[_-]?run/i.test(text) || /Would create|Would send|προσομοίωση/i.test(text);
-  // Prefer a readable message if it looks like a Python/JSON dict.
+
+  // New results are written as real JSON — parse directly, no quote-swapping needed.
+  try {
+    const obj = JSON.parse(text);
+    if (obj && typeof obj === "object") {
+      const m = obj.message || obj.detail || obj.status;
+      if (m) return { dryRun: dryRun || obj.status === "dry-run", text: String(m) };
+    }
+  } catch {
+    /* fall through to legacy formats below */
+  }
+
+  // Legacy rows: Python repr like "{'status': 'dry-run', 'message': '…'}".
   const msgMatch = text.match(/['"]message['"]\s*:\s*['"](.+?)['"]\s*[,}]/);
   if (msgMatch) {
     return { dryRun, text: msgMatch[1].replace(/\\'/g, "'") };
@@ -74,6 +92,7 @@ type Props = {
 };
 
 export default function PendingActionsPanel({ onChange }: Props) {
+  const router = useRouter();
   const [pending, setPending] = useState<Action[]>([]);
   const [history, setHistory] = useState<Action[]>([]);
   const [loading, setLoading] = useState(true);
@@ -88,11 +107,15 @@ export default function PendingActionsPanel({ onChange }: Props) {
       setHistory(h);
       onChange?.();
     } catch (e) {
+      if (isUnauthorized(e)) {
+        router.replace("/login");
+        return;
+      }
       console.error(e);
     } finally {
       setLoading(false);
     }
-  }, [onChange]);
+  }, [onChange, router]);
 
   useEffect(() => {
     load();
@@ -104,6 +127,10 @@ export default function PendingActionsPanel({ onChange }: Props) {
       await resolveAction(id, approve);
       await load();
     } catch (e: any) {
+      if (isUnauthorized(e)) {
+        router.replace("/login");
+        return;
+      }
       alert(e.message);
     } finally {
       setResolving(null);
