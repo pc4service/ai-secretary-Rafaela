@@ -97,6 +97,19 @@ function LoginForm() {
       )}
 
       <div className="space-y-3">
+        {!providers.google && !providers.microsoft && !providers.demo && (
+          <div className="rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-3 py-3 text-sm text-amber-900 dark:text-amber-100 space-y-2">
+            <p className="font-medium">Δεν υπάρχει διαθέσιμος τρόπος σύνδεσης</p>
+            <p className="text-xs leading-relaxed opacity-90">
+              Το API δεν επέστρεψε Google / Microsoft / Demo. Σε local production
+              χρειάζονται <code className="text-[11px]">MS_CLIENT_*</code> στο{" "}
+              <code className="text-[11px]">.env.prod</code> και CORS προς{" "}
+              <code className="text-[11px]">http://127.0.0.1:3000</code>. Έλεγξε ότι το
+              frontend χτυπάει το σωστό API (<code className="text-[11px]">NEXT_PUBLIC_API_URL</code>).
+            </p>
+          </div>
+        )}
+
         {providers.google && (
           <button
             onClick={onGoogle}

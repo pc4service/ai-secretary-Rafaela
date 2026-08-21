@@ -69,6 +69,20 @@ def test_production_without_usable_origins_denies_everything(monkeypatch):
     assert _cors_origins() == []
 
 
+def test_local_production_keeps_loopback_when_frontend_is_loopback(monkeypatch):
+    """scripts/local_prod.sh sets FRONTEND_URL to 127.0.0.1 — must not blank CORS."""
+    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+    monkeypatch.setattr(
+        settings,
+        "CORS_ORIGINS",
+        ["http://127.0.0.1:3000", "http://localhost:3000"],
+    )
+    monkeypatch.setattr(settings, "FRONTEND_URL", "http://127.0.0.1:3000")
+    origins = _cors_origins()
+    assert "http://127.0.0.1:3000" in origins
+    assert "http://localhost:3000" in origins
+
+
 # --- P2-8: docs are off in production ---
 
 def test_production_switches_docs_off():

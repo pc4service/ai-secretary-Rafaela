@@ -91,9 +91,9 @@ def _cors_origins() -> List[str]:
     Browser origins allowed to call the API.
 
     allow_credentials=True means every origin listed here can drive the API
-    with the user's session cookie, so loopback origins are only trusted
-    outside production — including the ones baked into the CORS_ORIGINS
-    default, which a deployment can easily forget to override.
+    with the user's session cookie. In production we drop *accidental* loopback
+    entries from the default CORS list — unless FRONTEND_URL itself is loopback
+    (local production mode on the developer machine).
     """
     from urllib.parse import urlparse
 
@@ -103,10 +103,17 @@ def _cors_origins() -> List[str]:
 
     if settings.ENVIRONMENT == "production":
         loopback = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
+        fe_host = (urlparse(settings.FRONTEND_URL or "").hostname or "").lower()
+        # Local prod: FRONTEND_URL=http://127.0.0.1:3000 → keep loopback allowlist.
+        # Real deploy: FRONTEND_URL=https://app.example.com → strip loopback leftovers.
+        allow_loopback = fe_host in loopback
         kept, dropped = [], []
         for origin in candidates:
             host = (urlparse(origin).hostname or "").lower()
-            (dropped if host in loopback else kept).append(origin)
+            if host in loopback and not allow_loopback:
+                dropped.append(origin)
+            else:
+                kept.append(origin)
         if dropped:
             logger.warning("cors_loopback_origins_dropped", origins=dropped)
         candidates = kept
