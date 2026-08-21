@@ -166,7 +166,6 @@ export default function Chat({
       .filter((m) => m.role === "user" || m.role === "assistant")
       .map((m) => ({ role: m.role, content: m.content }));
 
-    try {
     const finishAssistant = (patch: Partial<Message>) => {
       const finishedAt = Date.now();
       const start = runStartedAtRef.current ?? startedAt;

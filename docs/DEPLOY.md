@@ -4,6 +4,37 @@
 
 ---
 
+## Local production mode (Docker στο PC σου)
+
+Για να τρέξεις `ENVIRONMENT=production` **χωρίς VPS**, με HTTP στο loopback:
+
+```bash
+./scripts/local_prod.sh init   # φτιάχνει .env.prod (secrets + copy keys από .env)
+./scripts/local_prod.sh up     # σταματά dev compose · σηκώνει prod + local overlay
+```
+
+| URL | |
+|-----|--|
+| UI | http://127.0.0.1:3000 |
+| API | http://127.0.0.1:8000 |
+
+| Flag | Local prod τιμή | Γιατί |
+|------|-----------------|--------|
+| `ENVIRONMENT` | `production` | κλείνει demo login, docs, αυστηρό auth |
+| `REQUIRE_AUTH` | `true` | |
+| `COOKIE_SECURE` | **`false`** | είσαι σε `http://` · true μόνο με HTTPS |
+| `DRY_RUN` | `true` | ασφαλές pilot · flip όταν θες αληθινά writes |
+| `TRUSTED_PROXY_HOPS` | `0` | χωρίς nginx |
+
+- Login: **Microsoft** (το Demo είναι 403).
+- ChatGPT OAuth callback: `localhost:1455` (το `docker-compose.prod.local.yml` το ανοίγει).
+- Πίσω στο dev trial: `./scripts/local_prod.sh dev`
+- Αρχεία: `.env.prod.local.example`, `docker-compose.prod.local.yml`, `scripts/local_prod.sh`
+
+> Αυτό **δεν** είναι public internet. Για HTTPS + domain δες Cloudflare Tunnel / VPS παρακάτω.
+
+---
+
 ## Προαπαιτούμενα
 
 - [ ] Domain (π.χ. `rafaela.example.com`, `api.rafaela.example.com`)

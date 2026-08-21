@@ -1,0 +1,27 @@
+# =============================================================================
+# Local production overlay — use WITH docker-compose.prod.yml
+#
+#   docker compose -f docker-compose.prod.yml -f docker-compose.prod.local.yml \
+#     --env-file .env.prod up -d --build
+#
+# Or:  ./scripts/local_prod.sh up
+#
+# Differs from real VPS prod:
+#   - publishes Codex OAuth callback :1455
+#   - TRUSTED_PROXY_HOPS=0 (no nginx)
+#   - same 127.0.0.1 binds (stop the dev stack first — port clash)
+# =============================================================================
+
+services:
+  backend:
+    environment:
+      # No reverse proxy on bare local prod
+      TRUSTED_PROXY_HOPS: ${TRUSTED_PROXY_HOPS:-0}
+    ports:
+      - "127.0.0.1:8000:8000"
+      # ChatGPT / Codex OAuth redirect (auth.openai.com → localhost:1455)
+      - "127.0.0.1:1455:8000"
+
+  frontend:
+    ports:
+      - "127.0.0.1:3000:3000"

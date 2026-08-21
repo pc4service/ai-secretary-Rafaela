@@ -6,6 +6,11 @@
 # Keep example templates
 !.env.example
 !.env.prod.example
+!.env.prod.local.example
+
+# Local / prod secrets (never commit)
+.env.prod
+.env.prod.local
 
 # Dependencies
 node_modules/

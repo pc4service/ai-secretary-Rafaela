@@ -22,6 +22,9 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
       KNOWLEDGE_DIR: /knowledge
+      # Haystack tries to write ~/.haystack for telemetry on import
+      HAYSTACK_TELEMETRY_ENABLED: "False"
+      HOME: /tmp
       # Rate limiting keys on X-Forwarded-For only for this many proxies.
       # The documented deployment puts nginx in front, so 1. Raise to 2 behind
       # Cloudflare -> nginx. At 0 every user shares the proxy's bucket.
@@ -46,6 +49,7 @@ services:
     read_only: true
     tmpfs:
       - /tmp
+      - /home/appuser/.haystack
     cap_drop:
       - ALL
     cap_add:
