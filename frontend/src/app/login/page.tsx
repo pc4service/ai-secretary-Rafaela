@@ -22,8 +22,10 @@ function LoginForm() {
   });
   const [loading, setLoading] = useState<string | null>(null);
   const [checking, setChecking] = useState(true);
+  const [onLoopbackIp, setOnLoopbackIp] = useState(false);
 
   useEffect(() => {
+    setOnLoopbackIp(window.location.hostname === "127.0.0.1");
     (async () => {
       try {
         const me = await getMe();
@@ -88,6 +90,15 @@ function LoginForm() {
         <p className="text-sm text-slate-500 mt-1 text-center">
           AI Executive Secretary — σύνδεση λογαριασμού
         </p>
+        {onLoopbackIp && (
+            <p className="mt-3 text-xs text-amber-700 dark:text-amber-300 text-center leading-relaxed max-w-sm">
+              Άνοιξε την εφαρμογή από{" "}
+              <a className="underline font-medium" href="http://localhost:3000/login">
+                http://localhost:3000
+              </a>{" "}
+              — το Microsoft login δεν κρατά session στο 127.0.0.1.
+            </p>
+          )}
       </div>
 
       {error && (

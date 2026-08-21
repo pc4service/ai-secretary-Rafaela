@@ -111,22 +111,26 @@ cmd_init() {
   set_env_key DRY_RUN true
   set_env_key REQUIRE_AUTH true
   set_env_key COOKIE_SECURE false
-  set_env_key FRONTEND_URL "http://127.0.0.1:3000"
-  set_env_key NEXT_PUBLIC_API_URL "http://127.0.0.1:8000"
+  # IMPORTANT: use one hostname everywhere. Mixing localhost + 127.0.0.1 breaks
+  # the session cookie (set on OAuth callback host, read from the other).
+  set_env_key FRONTEND_URL "http://localhost:3000"
+  set_env_key NEXT_PUBLIC_API_URL "http://localhost:8000"
   set_env_key TRUSTED_PROXY_HOPS 0
   set_env_key MS_REDIRECT_URI "http://localhost:8000/api/v1/auth/microsoft/callback"
   set_env_key MS_LOGIN_REDIRECT_URI "http://localhost:8000/api/v1/login/microsoft/callback"
   set_env_key OPENAI_OAUTH_REDIRECT_URI "http://localhost:1455/auth/callback"
-  set_env_key CORS_ORIGINS '["http://127.0.0.1:3000","http://localhost:3000"]'
+  set_env_key CORS_ORIGINS '["http://localhost:3000","http://127.0.0.1:3000"]'
   set_env_key QDRANT_URL "http://qdrant:6333"
   set_env_key KNOWLEDGE_DIR "/knowledge"
 
   echo ""
   echo "Local production .env.prod ready."
-  echo "  UI:     http://127.0.0.1:3000"
-  echo "  API:    http://127.0.0.1:8000"
+  echo "  UI:     http://localhost:3000   (use THIS host — not 127.0.0.1)"
+  echo "  API:    http://localhost:8000"
   echo "  Login:  Microsoft (demo disabled)"
   echo "  Flags:  DRY_RUN=true COOKIE_SECURE=false REQUIRE_AUTH=true"
+  echo "  Azure redirect URI must include:"
+  echo "    http://localhost:8000/api/v1/login/microsoft/callback"
   echo "Next: ./scripts/local_prod.sh up"
 }
 
@@ -157,7 +161,8 @@ cmd_up() {
       docs=$(curl -s -o /dev/null -w "%{http_code}" "$API/docs" || true)
       echo "docs HTTP $docs (expect 404)"
       echo ""
-      echo "Open http://127.0.0.1:3000 → Microsoft sign-in"
+      echo "Open http://localhost:3000 → Microsoft sign-in"
+      echo "(Do not mix with http://127.0.0.1 — cookies will not stick.)"
       echo "Back to dev trial: ./scripts/local_prod.sh dev"
       exit 0
     fi

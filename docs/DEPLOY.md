@@ -15,8 +15,11 @@
 
 | URL | |
 |-----|--|
-| UI | http://127.0.0.1:3000 |
-| API | http://127.0.0.1:8000 |
+| UI | **http://localhost:3000** (όχι `127.0.0.1` — σπάει το cookie μετά το MS login) |
+| API | http://localhost:8000 |
+
+Azure App Registration → Redirect URI (Web):
+`http://localhost:8000/api/v1/login/microsoft/callback`
 
 | Flag | Local prod τιμή | Γιατί |
 |------|-----------------|--------|
