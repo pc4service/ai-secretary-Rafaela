@@ -1,0 +1,36 @@
+# Both docker-compose.yml and docker-compose.prod*.yml build with context: .
+# (repo root), so this applies to every backend/frontend build alike.
+
+# Installed dependencies — reinstalled fresh inside each build stage.
+# Frontend's builder stage does `COPY frontend/ .`, so a host-installed
+# node_modules here would otherwise get copied into the image verbatim.
+**/node_modules
+backend/.venv*
+venv/
+**/__pycache__/
+**/*.pyc
+
+# Version control
+.git
+.gitignore
+
+# Editor / OS cruft
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Secrets — never needed at build time; compose supplies env at runtime
+# via env_file/environment. Templates (.env.example etc.) are fine to keep.
+.env
+.env.local
+.env.prod
+.env.prod.local
+
+# Build outputs — regenerated inside the image
+frontend/.next/
+frontend/out/
+backend/.pytest_cache/
+backend/pytest_out.txt
+**/*.log
