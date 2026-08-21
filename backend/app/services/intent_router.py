@@ -146,7 +146,14 @@ _GROUP_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
             r"(?i)("
             r"firecrawl|research_with|scrap|"
             r"https?://|www\.|"
-            r"ιστ[οό]σελ|website|crawl|έρευν\w*\s+στο\s+web|search\s+the\s+web"
+            r"ιστ[οό]σελ|website|crawl|έρευν\w*\s+στο\s+web|search\s+the\s+web|"
+            # Generic "find me info about X" without a known URL — the most
+            # common real phrasing, and previously not matched at all, so it
+            # silently fell back to DEFAULT_AGENT_GROUPS (no web tools).
+            r"(φ[εέ]ρε|βρ[εέ]ς|ψ[αά]ξε|μ[αά]θε)\w*\s*(μου\s*)?πληροφορ|"
+            r"πληροφορ\w*\s+για\s+(την\s+)?εταιρ|"
+            r"\b(find|search|look\s*up|get)\b.{0,20}\binformation\b|"
+            r"\binformation\s+(about|on)\b"
             r")"
         ),
     ),

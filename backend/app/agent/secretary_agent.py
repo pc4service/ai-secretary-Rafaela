@@ -86,7 +86,7 @@ def get_current_datetime(timezone: str = "Europe/Athens") -> str:
 
 @tool
 def research_with_firecrawl(query: str, max_results: int = 3) -> str:
-    """Research a topic using Firecrawl. Returns clean markdown summaries."""
+    """Research a topic using Firecrawl web search. Returns titles, links and summaries."""
     if not settings.FIRECRAWL_API_KEY:
         return "Firecrawl API key is not configured."
     try:
@@ -103,17 +103,26 @@ def research_with_firecrawl(query: str, max_results: int = 3) -> str:
             )
         from firecrawl import FirecrawlApp
 
+        # Real web search, not a scrape of Google's results page — the SDK's
+        # own search() hits Firecrawl's search backend directly. Scraping
+        # Google's SERP HTML is against Google's ToS, gets blocked, and
+        # contradicts this file's own "not Google" instruction to the LLM.
         app = FirecrawlApp(api_key=settings.FIRECRAWL_API_KEY)
-        result = app.scrape_url(
-            f"https://www.google.com/search?q={query}",
-            params={"formats": ["markdown"]},
-        )
-        markdown = (result.get("markdown") if isinstance(result, dict) else None) or ""
-        if not markdown and hasattr(result, "markdown"):
-            markdown = result.markdown or ""
+        data = app.search(query, limit=max_results)
+        results = data.web or []
+        if not results:
+            return f"No web results found for '{query}'."
+
+        entries = []
+        for r in results:
+            title = getattr(r, "title", None) or getattr(r, "url", "")
+            url = getattr(r, "url", "")
+            desc = getattr(r, "description", None) or ""
+            entries.append(f"- **{title}** ({url})\n  {desc}")
+
         return (
-            f"Research results for '{query}':\n\n"
-            + wrap_untrusted(str(markdown)[:3000], DATA_NOT_INSTRUCTIONS)
+            f"Web search results for '{query}':\n\n"
+            + wrap_untrusted("\n\n".join(entries), DATA_NOT_INSTRUCTIONS)
         )
     except Exception as e:
         logger.exception("Firecrawl error")

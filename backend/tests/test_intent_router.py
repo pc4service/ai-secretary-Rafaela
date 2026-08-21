@@ -101,6 +101,25 @@ def test_web_scrape_group():
     assert "firecrawl_scrape_website" in d.tool_names
 
 
+def test_company_lookup_without_url_gets_web_group():
+    """Regression: 'φέρε πληροφορίες για την εταιρεία X' has no URL/'website'/
+    'firecrawl' keyword, so it used to fall through to DEFAULT_AGENT_GROUPS
+    (no web tools) and silently return nothing about the company."""
+    d = route_intent(
+        _user("Φέρε πληροφορίες για την εταιρεία GMG Constructions AE")
+    )
+    assert d.mode == "agent"
+    assert "web" in d.groups
+    assert "research_with_firecrawl" in d.tool_names
+
+
+def test_company_lookup_without_url_english():
+    d = route_intent(_user("Find information about GMG Constructions company"))
+    assert d.mode == "agent"
+    assert "web" in d.groups
+    assert "research_with_firecrawl" in d.tool_names
+
+
 def test_gdpr_export():
     d = route_intent(_user("Θέλω εξαγωγή δεδομένων GDPR"))
     assert d.mode == "agent"
