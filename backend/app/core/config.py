@@ -59,6 +59,12 @@ class Settings(BaseSettings):
     GEMINI_BASE_URL: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
     GEMINI_MODEL: str = "gemini-3.6-flash"
 
+    # Self-hosted / VPS OpenAI-compatible agent (e.g. hermes-agent)
+    # Requires chat.completions (+ ideally tools). Base URL usually ends with /v1
+    HERMES_API_KEY: Optional[str] = None
+    HERMES_BASE_URL: Optional[str] = None  # e.g. https://vps.example.com/v1
+    HERMES_MODEL: str = "default"
+
     # Official OpenAI fallback slot (different key from OPENAI_API_KEY when primary is a proxy)
     OPENAI_FALLBACK_API_KEY: Optional[str] = None
     OPENAI_FALLBACK_MODEL: str = "gpt-4o-mini"

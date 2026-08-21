@@ -96,7 +96,8 @@ cmd_init() {
       GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET \
       FIRECRAWL_API_KEY LLM_FAILOVER_CHAIN \
       XAI_API_KEY XAI_BASE_URL XAI_MODEL \
-      GEMINI_API_KEY GEMINI_BASE_URL GEMINI_MODEL
+      GEMINI_API_KEY GEMINI_BASE_URL GEMINI_MODEL \
+      HERMES_API_KEY HERMES_BASE_URL HERMES_MODEL
     do
       cur="$(env_get_file .env.prod "$k")"
       src="$(env_get_file .env "$k")"
