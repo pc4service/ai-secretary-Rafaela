@@ -90,6 +90,7 @@ Classic chat: `POST /api/v1/chat` still available.
 | Στρώμα | Τεχνολογία |
 |--------|------------|
 | Agent / Orchestration | Haystack 3.x (`Agent` + tools) · intent router · `AGENT_MAX_STEPS` |
+| LLM failover | OpenAI / ChatGPT OAuth / OpenCode / **xAI Grok** / **Gemini** (`llm_router`) |
 | Web research | Firecrawl |
 | Backend API | FastAPI + Uvicorn |
 | Auth integrations | MSAL (Microsoft), google-auth (Google) |

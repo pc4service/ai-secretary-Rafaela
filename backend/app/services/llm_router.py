@@ -16,6 +16,7 @@ Configuration (either works):
 2) Auto chain from filled env slots (when LLM_FAILOVER_CHAIN is empty):
    OPENAI_API_KEY (+ optional OPENAI_BASE_URL / LLM_MODEL)  → primary
    XAI_API_KEY    (+ optional XAI_MODEL)                   → xAI Grok
+   GEMINI_API_KEY (+ optional GEMINI_MODEL)                → Google Gemini
    OPENAI_FALLBACK_API_KEY (+ optional OPENAI_FALLBACK_MODEL) → plain OpenAI
 """
 
@@ -280,6 +281,18 @@ def auto_endpoints() -> List[LLMEndpoint]:
             )
         )
 
+    if _key_ok(settings.GEMINI_API_KEY):
+        out.append(
+            LLMEndpoint(
+                name="gemini",
+                model=settings.GEMINI_MODEL or "gemini-2.0-flash",
+                base_url=settings.GEMINI_BASE_URL
+                or "https://generativelanguage.googleapis.com/v1beta/openai/",
+                api_key=settings.GEMINI_API_KEY or "",
+                source="auto",
+            )
+        )
+
     if _key_ok(settings.OPENAI_FALLBACK_API_KEY):
         out.append(
             LLMEndpoint(
@@ -467,10 +480,10 @@ def run_with_llm_failover(
         + "). "
         "Η σύνδεση Microsoft 365 δίνει μόνο email/ημερολόγιο — όχι μοντέλο chat. "
         "Για απαντήσεις διάλεξε ένα από: "
-        "(1) Ρυθμίσεις → Σύνδεση ChatGPT/OpenAI OAuth, "
-        "(2) OPENAI_API_KEY=sk-… στο .env (επίσημο OpenAI Platform), "
+        "(1) Ρυθμίσεις → Σύνδεση ChatGPT OAuth, "
+        "(2) OPENAI_API_KEY / XAI_API_KEY / GEMINI_API_KEY στο .env, "
         "(3) έγκυρο OPENCODE_API_KEY με credits. "
-        "Microsoft Graph ≠ OpenAI."
+        "Microsoft 365 ≠ LLM."
     )
 
 

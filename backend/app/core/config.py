@@ -53,6 +53,12 @@ class Settings(BaseSettings):
     XAI_BASE_URL: str = "https://api.x.ai/v1"
     XAI_MODEL: str = "grok-3-mini"
 
+    # Google Gemini via OpenAI-compatible endpoint (auto-added when key is set)
+    # https://ai.google.dev/gemini-api/docs/openai
+    GEMINI_API_KEY: Optional[str] = None
+    GEMINI_BASE_URL: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
+    GEMINI_MODEL: str = "gemini-2.0-flash"
+
     # Official OpenAI fallback slot (different key from OPENAI_API_KEY when primary is a proxy)
     OPENAI_FALLBACK_API_KEY: Optional[str] = None
     OPENAI_FALLBACK_MODEL: str = "gpt-4o-mini"
