@@ -57,7 +57,7 @@ class Settings(BaseSettings):
     # https://ai.google.dev/gemini-api/docs/openai
     GEMINI_API_KEY: Optional[str] = None
     GEMINI_BASE_URL: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
-    GEMINI_MODEL: str = "gemini-2.0-flash"
+    GEMINI_MODEL: str = "gemini-3.6-flash"
 
     # Official OpenAI fallback slot (different key from OPENAI_API_KEY when primary is a proxy)
     OPENAI_FALLBACK_API_KEY: Optional[str] = None

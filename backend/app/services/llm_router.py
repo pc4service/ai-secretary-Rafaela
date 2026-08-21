@@ -285,7 +285,7 @@ def auto_endpoints() -> List[LLMEndpoint]:
         out.append(
             LLMEndpoint(
                 name="gemini",
-                model=settings.GEMINI_MODEL or "gemini-2.0-flash",
+                model=settings.GEMINI_MODEL or "gemini-3.6-flash",
                 base_url=settings.GEMINI_BASE_URL
                 or "https://generativelanguage.googleapis.com/v1beta/openai/",
                 api_key=settings.GEMINI_API_KEY or "",
