@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, Suspense } from "react";
 import { useRouter } from "next/navigation";
 import Chat from "@/components/Chat";
 import SettingsPanel from "@/components/Settings";
@@ -229,7 +229,17 @@ export default function Home() {
         {tab === "actions" && (
           <PendingActionsPanel onChange={() => void refreshMeta()} />
         )}
-        {tab === "settings" && <SettingsPanel />}
+        {tab === "settings" && (
+          <Suspense
+            fallback={
+              <div className="flex justify-center py-16">
+                <Loader2 className="animate-spin text-rose-600" size={28} />
+              </div>
+            }
+          >
+            <SettingsPanel />
+          </Suspense>
+        )}
       </main>
     </div>
   );

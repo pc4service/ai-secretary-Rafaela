@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   getSettings,
   getMicrosoftAuthUrl,
@@ -74,8 +74,10 @@ export default function SettingsPanel() {
   const [data, setData] = useState<SettingsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [flash, setFlash] = useState<string | null>(null);
 
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   async function load() {
     try {
@@ -95,6 +97,22 @@ export default function SettingsPanel() {
   useEffect(() => {
     load();
   }, []);
+
+  useEffect(() => {
+    const oai = searchParams.get("openai");
+    if (oai === "connected") {
+      setFlash("ChatGPT OAuth συνδέθηκε. Θα χρησιμοποιείται ως primary LLM (Grok/OpenCode ως backup).");
+      load();
+      // Clean query without full navigation away from settings
+      if (typeof window !== "undefined") {
+        const u = new URL(window.location.href);
+        u.searchParams.delete("openai");
+        window.history.replaceState({}, "", u.pathname + u.search + (u.search ? "" : "?tab=settings"));
+      }
+    } else if (oai === "error") {
+      setFlash("Αποτυχία ChatGPT OAuth. Δοκίμασε ξανά (callback http://localhost:1455).");
+    }
+  }, [searchParams]);
 
   async function connectMs() {
     setActionLoading("ms");
@@ -209,6 +227,12 @@ export default function SettingsPanel() {
         </p>
       </div>
 
+      {flash && (
+        <div className="rounded-xl border border-emerald-200 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/40 px-4 py-3 text-sm text-emerald-900 dark:text-emerald-100">
+          {flash}
+        </div>
+      )}
+
       {/* Status cards */}
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-soft">
@@ -267,9 +291,9 @@ export default function SettingsPanel() {
           )}
         </div>
 
-        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-soft">
+        <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-soft sm:col-span-2">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="font-medium">OpenAI / ChatGPT</h2>
+            <h2 className="font-medium">ChatGPT OAuth (εγκέφαλος LLM)</h2>
             {data?.openai_connected ? (
               <CheckCircle2 className="text-emerald-500" size={20} />
             ) : (
@@ -277,8 +301,15 @@ export default function SettingsPanel() {
             )}
           </div>
           <p className="text-sm text-slate-500 mb-2">
-            Σύνδεση με λογαριασμό ChatGPT (OAuth) — χωρίς API key
+            Σύνδεση με <strong>ChatGPT subscription</strong> (Codex OAuth) — χωρίς{" "}
+            <code className="text-xs">OPENAI_API_KEY</code>. Ξεχωριστό από Microsoft 365
+            (mail/calendar).
           </p>
+          <ul className="text-xs text-slate-500 mb-4 list-disc pl-4 space-y-1">
+            <li>Callback: <code>http://localhost:1455/auth/callback</code> (το backend ακούει εκεί)</li>
+            <li>Όταν συνδεθεί, γίνεται <strong>primary LLM</strong>· Grok / OpenCode μένουν backup</li>
+            <li>Χρειάζεται ενεργή συνδρομή ChatGPT που επιτρέπει Codex</li>
+          </ul>
           {data?.openai_connected ? (
             <>
               <div className="mb-4 rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900 px-3 py-2">
@@ -300,7 +331,7 @@ export default function SettingsPanel() {
                 disabled={actionLoading === "openai-disc"}
                 className="inline-flex items-center gap-2 text-sm text-red-600 hover:text-red-700"
               >
-                <Unlink size={16} /> Αποσύνδεση
+                <Unlink size={16} /> Αποσύνδεση ChatGPT
               </button>
             </>
           ) : (
@@ -314,7 +345,7 @@ export default function SettingsPanel() {
               ) : (
                 <Link2 size={16} />
               )}
-              Σύνδεση OpenAI
+              Σύνδεση με ChatGPT
             </button>
           )}
         </div>

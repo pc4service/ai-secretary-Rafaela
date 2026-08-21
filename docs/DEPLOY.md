@@ -30,7 +30,10 @@ Azure App Registration → Redirect URI (Web):
 | `TRUSTED_PROXY_HOPS` | `0` | χωρίς nginx |
 
 - Login: **Microsoft** (το Demo είναι 403).
-- ChatGPT OAuth callback: `localhost:1455` (το `docker-compose.prod.local.yml` το ανοίγει).
+- **ChatGPT OAuth (LLM):** μετά το login → Ρυθμίσεις → «Σύνδεση με ChatGPT».
+  Callback: `http://localhost:1455/auth/callback` (port στο `docker-compose.prod.local.yml`).
+  Όταν συνδεθεί, είναι **primary LLM**· Grok (`XAI_*`) / OpenCode μένουν backup.
+  Δεν αντικαθιστά Microsoft 365 (mail/calendar).
 - Πίσω στο dev trial: `./scripts/local_prod.sh dev`
 - Αρχεία: `.env.prod.local.example`, `docker-compose.prod.local.yml`, `scripts/local_prod.sh`
 
