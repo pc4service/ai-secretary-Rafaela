@@ -35,6 +35,10 @@ Azure App Registration → Redirect URI (Web):
 - Αρχεία: `.env.prod.local.example`, `docker-compose.prod.local.yml`, `scripts/local_prod.sh`
 
 > Αυτό **δεν** είναι public internet. Για HTTPS + domain δες Cloudflare Tunnel / VPS παρακάτω.
+> Μην κάνεις tunnel/port-forward αυτό το stack στο internet χωρίς να αλλάξεις πρώτα
+> `FRONTEND_URL` σε non-loopback: το CORS επιτρέπει loopback origins όσο το
+> `FRONTEND_URL` είναι loopback, ό,τι θα άνοιγε credentialed cross-origin αιτήματα
+> από `localhost` σελίδα οποιουδήποτε επισκέπτη.
 
 ---
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Local production-mode stack (your machine, HTTP on 127.0.0.1)
+# Local production-mode stack (your machine, HTTP on localhost)
 #
 #   ./scripts/local_prod.sh init    # create .env.prod from template + .env secrets
 #   ./scripts/local_prod.sh up      # stop dev compose, build & start prod.local
@@ -25,7 +25,7 @@ COMPOSE_PROD=(
 )
 COMPOSE_DEV=(docker compose -f docker-compose.yml)
 CMD="${1:-up}"
-API="${API_BASE:-http://127.0.0.1:8000}"
+API="${API_BASE:-http://localhost:8000}"
 
 info() { echo "=== $* ==="; }
 die() { echo "ERROR: $*" >&2; exit 1; }
