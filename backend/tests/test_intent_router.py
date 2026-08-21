@@ -20,6 +20,23 @@ def test_greeting_is_simple():
     assert d.tool_names == []
 
 
+def test_greeting_plus_day_review_is_agent_with_mail_cal():
+    """Must not strip tools just because the message starts with Καλησπέρα."""
+    d = route_intent(
+        _user("Καλησπέρα, κάνε μου μια ανασκόπηση της σημερινής ημέρας")
+    )
+    assert d.mode == "agent"
+    assert "ms_list_calendar" in d.tool_names or "google_list_calendar" in d.tool_names
+    assert "ms_list_emails" in d.tool_names or "google_list_emails" in d.tool_names
+    assert "get_current_datetime" in d.tool_names
+
+
+def test_daily_review_english():
+    d = route_intent(_user("Please do my daily review for today"))
+    assert d.mode == "agent"
+    assert "ms_list_emails" in d.tool_names or "search_conversation_memory" in d.tool_names
+
+
 def test_thanks_is_simple():
     d = route_intent(_user("Ευχαριστώ πολύ!"))
     assert d.mode == "simple"

@@ -65,6 +65,10 @@ _FORCE_AGENT = re.compile(
     r"\b(gdpr|εξαγωγ|διαγραφ|export|delete\s*my\s*data|δικα[ιί]ωμα)\w*|"
     r"\b(πρ[οό]τειν|propose|δημιο[υύ]ργησ|create\s*event|schedule|κλε[ιί]σ)\w*|"
     r"\b(θυμ[αά]σ|συνομιλ|χθες|προχθ[εέ]ς|yesterday|last\s*chat|previous\s*(chat|conversation)|ιστορικ)\w*|"
+    # daily briefing / secretary work even when prefixed with a greeting
+    r"ανασκ[οό]πησ\w*|σ[υύ]νοψ\w*|briefing|daily\s*review|end\s*of\s*day|"
+    r"εκκρεμ\w*|προτεραι\w*|task\w*|to\-?do|εργασ[ιί]\w*|"
+    r"τι\s*(έχω|έγινε|προγραμμ)\w*|what('s|\s+is)\s+(on\s+)?(my\s+)?(today|calendar)|"
     r"\b(δι[αά]βασ|list|δε[ιί]ξ|show|check|//[εέ]λεγξ)\w*.{0,40}\b(mail|email|calendar|ραντεβ|inbox)"
     r")"
 )
@@ -83,6 +87,19 @@ _GROUP_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
             r"τι\s*(είπαμε|συζητ[ηή]σαμε|είπες)|"
             r"what\s*(did\s*we|we)\s*(discuss|say|talk)|"
             r"ιστορικ[οό]\s*συνομιλ|conversation\s*history|chat\s*memory"
+            r")"
+        ),
+    ),
+    # Day briefing pulls calendar + mail (+ memory); handled via DEFAULT when only this hits
+    (
+        "day_brief",
+        re.compile(
+            r"(?i)("
+            r"ανασκ[οό]πησ\w*|σ[υύ]νοψ\w*\s*(ημ[εέ]ρ|day|today)|"
+            r"daily\s*(review|brief|summary|digest)|end\s*of\s*day|"
+            r"briefing|wrap\-?up|"
+            r"τι\s*(έχω|έγινε)\s*(σ[ηή]μερα|today)|"
+            r"what('s|\s+is)\s+on\s+(for\s+)?today|today'?s\s+(agenda|schedule|overview)"
             r")"
         ),
     ),
@@ -245,18 +262,25 @@ def route_intent(
     groups = detect_groups(text)
     force = bool(_FORCE_AGENT.search(text))
     simple_hit = bool(_SIMPLE_OK.search(text))
+    words = re.findall(r"\w+", text, flags=re.UNICODE)
 
-    # Short, simple-looking, no domain force → no tools.
-    if simple_hit and not force and not groups:
+    # day_brief is a virtual group → expand to mail+cal+memory+core
+    if "day_brief" in groups:
+        groups.discard("day_brief")
+        groups.update({"core", "memory", "mail_ms", "cal_ms", "mail_google", "cal_google"})
+        force = True
+
+    # Greeting + real task ("Καλησπέρα, κάνε ανασκόπηση…") must NOT go simple.
+    # Only pure chit-chat: after stripping greeting-like tokens, little remains.
+    residual = _SIMPLE_OK.sub(" ", text)
+    residual_words = re.findall(r"\w+", residual, flags=re.UNICODE)
+    pure_chitchat = simple_hit and not force and not groups and len(residual_words) <= 2
+
+    if pure_chitchat:
         return RouteDecision(mode="simple", groups=frozenset(), reason="chitchat")
 
-    # Very short message without domain cues
-    words = re.findall(r"\w+", text, flags=re.UNICODE)
-    if len(words) <= 6 and not force and not groups and simple_hit:
+    if not force and not groups and len(words) <= 6 and simple_hit and len(residual_words) <= 2:
         return RouteDecision(mode="simple", groups=frozenset(), reason="short_chitchat")
-
-    if not force and not groups and len(words) <= 12 and simple_hit:
-        return RouteDecision(mode="simple", groups=frozenset(), reason="simple_phrase")
 
     if not groups:
         # Unclear secretary task — broad default pack, still skip web/gdpr noise.
