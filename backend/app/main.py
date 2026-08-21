@@ -292,22 +292,25 @@ async def chat(request: ChatRequest, raw: Request, uid: str = Depends(resolve_us
         conv = await get_or_create_conversation(effective_user, request.conversation_id)
         conversation_id = conv.id
 
-        # Load history from DB if no client history provided
+        # Prefer durable DB history for this thread (last N). Client history is a
+        # fallback only — the UI buffer can miss older turns / other devices.
         messages: List[ChatMessage] = []
-        if request.history:
+        db_msgs = await get_conversation_messages(
+            conversation_id, limit=40, user_id=effective_user
+        )
+        if db_msgs:
+            for m in db_msgs:
+                if m["role"] == "user":
+                    messages.append(ChatMessage.from_user(m["content"]))
+                elif m["role"] == "assistant":
+                    messages.append(ChatMessage.from_assistant(m["content"]))
+        elif request.history:
             for h in request.history:
                 role, content = h.get("role", "user"), h.get("content", "")
                 if role == "user":
                     messages.append(ChatMessage.from_user(content))
                 elif role == "assistant":
                     messages.append(ChatMessage.from_assistant(content))
-        else:
-            db_msgs = await get_conversation_messages(conversation_id, limit=30)
-            for m in db_msgs:
-                if m["role"] == "user":
-                    messages.append(ChatMessage.from_user(m["content"]))
-                elif m["role"] == "assistant":
-                    messages.append(ChatMessage.from_assistant(m["content"]))
 
         messages.append(ChatMessage.from_user(request.message))
         await add_message(conversation_id, "user", request.message)
@@ -361,20 +364,22 @@ async def chat_stream(request: ChatRequest, uid: str = Depends(resolve_user_id))
             conversation_id = conv.id
 
             messages: List[ChatMessage] = []
-            if request.history:
+            db_msgs = await get_conversation_messages(
+                conversation_id, limit=40, user_id=effective_user
+            )
+            if db_msgs:
+                for m in db_msgs:
+                    if m["role"] == "user":
+                        messages.append(ChatMessage.from_user(m["content"]))
+                    elif m["role"] == "assistant":
+                        messages.append(ChatMessage.from_assistant(m["content"]))
+            elif request.history:
                 for h in request.history:
                     role, content = h.get("role", "user"), h.get("content", "")
                     if role == "user":
                         messages.append(ChatMessage.from_user(content))
                     elif role == "assistant":
                         messages.append(ChatMessage.from_assistant(content))
-            else:
-                db_msgs = await get_conversation_messages(conversation_id, limit=30)
-                for m in db_msgs:
-                    if m["role"] == "user":
-                        messages.append(ChatMessage.from_user(m["content"]))
-                    elif m["role"] == "assistant":
-                        messages.append(ChatMessage.from_assistant(m["content"]))
 
             messages.append(ChatMessage.from_user(request.message))
             await add_message(conversation_id, "user", request.message)

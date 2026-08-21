@@ -653,3 +653,31 @@ Baseline (local, `kimi-k3`): simple ~12s · knowledge ~25–28s.
 
 - `tests/test_intent_router.py`
 - `tests/test_codex_incomplete.py`
+
+---
+
+## Φάση 13 — 2026-08-21 · Conversation memory ("τι είπαμε χθες")
+
+### Πρόβλημα
+
+Ο χρήστης ρώτησε για χθεσινή **συνομιλία Rafaela**· ο agent άνοιξε mail/calendar
+γιατί (α) δεν υπήρχε tool μνήμης chats, (β) κάθε thread είναι απομονωμένο,
+(γ) το client `history` προτιμούνταν έναντι DB, (δ) το DB load έπαιρνε τα
+*παλαιότερα* N μηνύματα αντί τα *τελευταία*.
+
+### Διόρθωση
+
+| Αλλαγή | Αρχείο |
+|--------|--------|
+| Tool `search_conversation_memory` | `tools/memory_tools.py` |
+| `search_user_conversation_memory` (user-scoped) | `services/conversation.py` |
+| Intent group `memory` (χθες / θυμάσαι / συνομιλία) | `intent_router.py` |
+| System prompt: memory **πριν** mail/calendar | `secretary_agent.py` |
+| Chat load: **DB first** (last 40) | `main.py` |
+| `get_conversation_messages`: last N chronological | `conversation.py` |
+
+### Όρια (αναμενόμενα)
+
+- Θυμάται μόνο ό,τι είναι στη Postgres `messages` (όχι εξωτερικό Teams/Slack).
+- Διαφορετικός λογαριασμός / demo-user ≠ πραγματικός user → άδεια μνήμη.
+- Retention GDPR μπορεί να έχει σβήσει παλιά μηνύματα.

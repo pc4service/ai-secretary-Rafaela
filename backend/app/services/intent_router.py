@@ -19,6 +19,7 @@ from typing import FrozenSet, Iterable, List, Optional, Sequence, Set
 
 TOOL_GROUPS: dict[str, tuple[str, ...]] = {
     "core": ("get_current_datetime",),
+    "memory": ("search_conversation_memory",),
     "knowledge": ("search_knowledge", "knowledge_base_status"),
     "mail_ms": ("ms_list_emails",),
     "cal_ms": ("ms_list_calendar", "ms_propose_create_event"),
@@ -34,7 +35,7 @@ TOOL_GROUPS: dict[str, tuple[str, ...]] = {
 
 # Default agent pack when we know we need tools but not which domain.
 DEFAULT_AGENT_GROUPS: FrozenSet[str] = frozenset(
-    {"core", "knowledge", "mail_ms", "cal_ms", "mail_google", "cal_google"}
+    {"core", "memory", "knowledge", "mail_ms", "cal_ms", "mail_google", "cal_google"}
 )
 
 # --- Patterns (EL + EN). Keep conservative: false "agent" is OK; false "simple" is not. ---
@@ -56,18 +57,35 @@ _SIMPLE_OK = re.compile(
 _FORCE_AGENT = re.compile(
     r"(?i)("
     # explicit tools / data
-    r"\b(search_knowledge|ms_|google_|firecrawl|tool)\b|"
+    r"\b(search_knowledge|search_conversation_memory|ms_|google_|firecrawl|tool)\b|"
     r"\b(email|emails|inbox|mail|gmail|outlook|μην[υύ]ματ|αλληλογραφ)\w*|"
     r"\b(calendar|event|ραντεβ|ημερολ[οό]γ|συν[αά]ντησ|meeting|agenda)\w*|"
     r"\b(πρ[οό]τυπ|template|follow[\s\-]?up|tone\s*of\s*voice|playbook|knowledge|γν[ωώ]σ)\w*|"
     r"\b(research|scrap|ιστ[οό]σελ|website|https?://|www\.)\w*|"
     r"\b(gdpr|εξαγωγ|διαγραφ|export|delete\s*my\s*data|δικα[ιί]ωμα)\w*|"
     r"\b(πρ[οό]τειν|propose|δημιο[υύ]ργησ|create\s*event|schedule|κλε[ιί]σ)\w*|"
+    r"\b(θυμ[αά]σ|συνομιλ|χθες|προχθ[εέ]ς|yesterday|last\s*chat|previous\s*(chat|conversation)|ιστορικ)\w*|"
     r"\b(δι[αά]βασ|list|δε[ιί]ξ|show|check|//[εέ]λεγξ)\w*.{0,40}\b(mail|email|calendar|ραντεβ|inbox)"
     r")"
 )
 
 _GROUP_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
+    (
+        "memory",
+        re.compile(
+            r"(?i)("
+            r"search_conversation_memory|"
+            r"θυμ[αά]σ\w*|συνομιλ\w*|"
+            r"χθες|προχθ[εέ]ς|yesterday|"
+            r"last\s*(week|night|time|chat|conversation)|"
+            r"previous\s*(chat|conversation|thread)|"
+            r"προηγο[υύ]μεν\w*\s*(συνομιλ|chat|thread)|"
+            r"τι\s*(είπαμε|συζητ[ηή]σαμε|είπες)|"
+            r"what\s*(did\s*we|we)\s*(discuss|say|talk)|"
+            r"ιστορικ[οό]\s*συνομιλ|conversation\s*history|chat\s*memory"
+            r")"
+        ),
+    ),
     (
         "knowledge",
         re.compile(

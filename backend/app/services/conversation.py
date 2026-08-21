@@ -68,7 +68,7 @@ async def get_conversation_messages(
     user_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """
-    Messages of a conversation.
+    Messages of a conversation (most recent ``limit``, chronological order).
 
     Pass user_id whenever the caller is a request: without it this returns any
     conversation's messages to anyone holding the id. It stays optional so
@@ -79,10 +79,11 @@ async def get_conversation_messages(
         query = select(Message).where(Message.conversation_id == conversation_id)
         if user_id is not None:
             query = query.join(Conversation).where(Conversation.user_id == user_id)
+        # Newest first for the window, then reverse → chronological for the LLM.
         result = await session.execute(
-            query.order_by(Message.created_at.asc()).limit(limit)
+            query.order_by(Message.created_at.desc()).limit(limit)
         )
-        messages = result.scalars().all()
+        messages = list(reversed(result.scalars().all()))
         return [
             {
                 "id": m.id,
@@ -93,6 +94,92 @@ async def get_conversation_messages(
             }
             for m in messages
         ]
+
+
+async def search_user_conversation_memory(
+    user_id: str,
+    *,
+    query: str = "",
+    days: int = 7,
+    limit: int = 25,
+    conversation_id: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Search this user's stored chat messages (across conversations by default).
+
+    Used when the user asks what was discussed yesterday / earlier — that data
+    lives in Postgres, not in Outlook. Scoped strictly by user_id.
+    """
+    from datetime import timedelta
+    from sqlalchemy import and_, or_
+
+    days = max(1, min(int(days or 7), 90))
+    limit = max(1, min(int(limit or 25), 50))
+    q = (query or "").strip()
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+
+    async with AsyncSessionLocal() as session:
+        stmt = (
+            select(Message, Conversation)
+            .join(Conversation, Message.conversation_id == Conversation.id)
+            .where(
+                Conversation.user_id == user_id,
+                Message.created_at >= since,
+            )
+        )
+        if conversation_id:
+            stmt = stmt.where(Message.conversation_id == conversation_id)
+        if q:
+            # Simple ILIKE tokens (AND). Avoids raw SQL injection via bound params.
+            tokens = [t for t in q.replace(",", " ").split() if len(t) >= 2][:8]
+            if tokens:
+                stmt = stmt.where(
+                    and_(*[Message.content.ilike(f"%{t}%") for t in tokens])
+                )
+        stmt = stmt.order_by(Message.created_at.desc()).limit(limit)
+        rows = (await session.execute(stmt)).all()
+
+        out: List[Dict[str, Any]] = []
+        for msg, conv in rows:
+            out.append(
+                {
+                    "conversation_id": conv.id,
+                    "conversation_title": conv.title,
+                    "role": msg.role,
+                    "content": (msg.content or "")[:1500],
+                    "created_at": msg.created_at.isoformat() if msg.created_at else None,
+                }
+            )
+        return out
+
+
+def format_memory_for_agent(hits: List[Dict[str, Any]], *, query: str = "") -> str:
+    """Human-readable block for the LLM (not untrusted third-party content)."""
+    if not hits:
+        return (
+            "No matching messages found in Rafaela conversation history "
+            f"for query={query!r}. "
+            "Tell the user you only searched *chat memory* (not email/calendar) "
+            "and ask for a keyword, date, or to open the old thread in the sidebar."
+        )
+    lines = [
+        f"Found {len(hits)} message(s) in conversation history"
+        + (f" matching {query!r}" if query else "")
+        + ":",
+        "Use these as prior chat context. Do NOT claim they are emails or calendar events.",
+        "",
+    ]
+    for i, h in enumerate(hits, 1):
+        when = h.get("created_at") or "?"
+        title = h.get("conversation_title") or "(no title)"
+        role = h.get("role") or "?"
+        body = (h.get("content") or "").replace("\n", " ").strip()
+        if len(body) > 400:
+            body = body[:400] + "…"
+        lines.append(
+            f"{i}. [{when}] conv={title!r} ({role}): {body}"
+        )
+    return "\n".join(lines)
 
 
 async def list_conversations(user_id: str, limit: int = 20) -> List[Dict[str, Any]]:

@@ -37,6 +37,8 @@ You assist the user with calendar management, email handling, task organization,
 
 3. Tool Usage
    - ALWAYS use tools for live data. Never claim you lack inbox/calendar access without trying the tool first.
+   - **Past Rafaela chats** ("τι είπαμε χθες", "θυμάσαι", previous thread): call **search_conversation_memory** first. That is app chat history, NOT email/calendar. Only after memory returns nothing may you offer to check mail/calendar.
+   - Messages already in this turn's conversation context are visible to you — use them before tools when the user refers to "above" / "earlier in this chat".
    - Emails (Outlook): call ms_list_emails. Calendar (Outlook): call ms_list_calendar.
    - Gmail/Google Calendar: google_list_emails / google_list_calendar when Google is connected.
    - Company templates / playbooks / tone / agenda / follow-up drafts: ALWAYS call search_knowledge first, then adapt the template to the user context.
@@ -160,12 +162,14 @@ def _default_tools() -> List:
         search_knowledge,
         knowledge_base_status,
     )
+    from app.tools.memory_tools import search_conversation_memory
     from app.tools.firecrawl_tools import (
         firecrawl_scrape_website,
         firecrawl_propose_save_to_knowledge,
     )
     return [
         get_current_datetime,
+        search_conversation_memory,
         research_with_firecrawl,
         firecrawl_scrape_website,
         firecrawl_propose_save_to_knowledge,
