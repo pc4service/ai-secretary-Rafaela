@@ -214,7 +214,7 @@ async def execute_action(action_type: str, payload: dict, user_id: str) -> str:
         service = Microsoft365Service(token.get("access_token"), token.get("refresh_token"))
         result = await service.send_mail(payload["to"], payload["subject"], payload["body"])
         await log_audit(user_id, "ms_send_email", {"to": payload["to"], "subject": payload["subject"]})
-        return str(result)
+        return json.dumps(result)
 
     elif action_type == "ms_create_event":
         try:
@@ -228,7 +228,7 @@ async def execute_action(action_type: str, payload: dict, user_id: str) -> str:
             body=payload.get("body", ""), location=payload.get("location", ""), attendees=att,
         )
         await log_audit(user_id, "ms_create_event", {"subject": payload["subject"]})
-        return str(result)
+        return json.dumps(result)
 
     elif action_type == "google_send_email":
         token = await get_oauth_token(user_id, "google")
@@ -237,7 +237,7 @@ async def execute_action(action_type: str, payload: dict, user_id: str) -> str:
         service = GoogleWorkspaceService(token_data=token)
         result = service.send_email(payload["to"], payload["subject"], payload["body"])
         await log_audit(user_id, "google_send_email", {"to": payload["to"]})
-        return str(result)
+        return json.dumps(result)
 
     elif action_type == "google_create_event":
         token = await get_oauth_token(user_id, "google")
@@ -250,7 +250,7 @@ async def execute_action(action_type: str, payload: dict, user_id: str) -> str:
             description=payload.get("description", ""), location=payload.get("location", ""), attendees=att,
         )
         await log_audit(user_id, "google_create_event", {"summary": payload["summary"]})
-        return str(result)
+        return json.dumps(result)
 
     elif action_type == "knowledge_save_page":
         from app.services.knowledge import save_knowledge_markdown, index_knowledge_to_qdrant
