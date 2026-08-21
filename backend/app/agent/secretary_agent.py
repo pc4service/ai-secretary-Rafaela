@@ -214,8 +214,9 @@ def create_secretary_agent(
         endpoints = list_llm_endpoints()
         if not endpoints:
             raise ValueError(
-                "Δεν έχει ρυθμιστεί LLM. Βάλε OPENAI_API_KEY (επίσημο OpenAI) "
-                "στο .env. Το OpenCode key πάει στο OPENCODE_API_KEY."
+                "Δεν έχει ρυθμιστεί LLM. Βάλε OPENAI_API_KEY (Platform sk-…) "
+                "ή OPENCODE_API_KEY στο .env, ή συνδέσου ChatGPT OAuth από Ρυθμίσεις. "
+                "Microsoft 365 ≠ LLM."
             )
         chat_generator = build_chat_generator(endpoints[0])
 

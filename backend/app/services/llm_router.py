@@ -428,8 +428,10 @@ def run_with_llm_failover(
     endpoints = ordered_endpoints(access_token=access_token)
     if not endpoints:
         raise ValueError(
-            "No LLM provider configured. Set OPENAI_API_KEY and/or XAI_API_KEY "
-            "(and optionally LLM_FAILOVER_CHAIN). See .env.example."
+            "Δεν έχει ρυθμιστεί κανένα LLM. "
+            "Βάλε OPENAI_API_KEY (Platform sk-…) ή OPENCODE_API_KEY, "
+            "ή συνδέσου με ChatGPT OAuth από Ρυθμίσεις. "
+            "Το Microsoft 365 login δεν μετράει ως LLM."
         )
 
     errors: List[str] = []
@@ -458,11 +460,17 @@ def run_with_llm_failover(
 
     tried = ", ".join(e.name for e in endpoints)
     logger.error("llm_all_failed", errors=errors[:5], tried=tried)
+    # Clear bilingual guidance — Microsoft 365 is NOT an LLM provider.
     raise RuntimeError(
         "Δεν ήταν δυνατή η σύνδεση με κανένα LLM ("
         + tried
-        + "). Βάλε έγκυρο OPENAI_API_KEY (επίσημο OpenAI, sk-…) "
-        "ή περίμενε αν το backup OpenCode είναι αργό / χωρίς credits."
+        + "). "
+        "Η σύνδεση Microsoft 365 δίνει μόνο email/ημερολόγιο — όχι μοντέλο chat. "
+        "Για απαντήσεις διάλεξε ένα από: "
+        "(1) Ρυθμίσεις → Σύνδεση ChatGPT/OpenAI OAuth, "
+        "(2) OPENAI_API_KEY=sk-… στο .env (επίσημο OpenAI Platform), "
+        "(3) έγκυρο OPENCODE_API_KEY με credits. "
+        "Microsoft Graph ≠ OpenAI."
     )
 
 
