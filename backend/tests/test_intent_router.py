@@ -37,6 +37,24 @@ def test_daily_review_english():
     assert "ms_list_emails" in d.tool_names or "search_conversation_memory" in d.tool_names
 
 
+def test_pasted_url_gets_firecrawl_tools():
+    d = route_intent(
+        _user(
+            "Ευχαριστώ — το σωστό φαίνεται να είναι:\n\nhttps://gmgconstructions.gr"
+        )
+    )
+    assert d.mode == "agent"
+    assert "web" in d.groups or "firecrawl_scrape_website" in d.tool_names
+    assert "firecrawl_scrape_website" in d.tool_names
+    assert "research_with_firecrawl" in d.tool_names
+
+
+def test_bare_domain_gets_web_tools():
+    d = route_intent(_user("Δες το gmgconstructions.gr"))
+    assert d.mode == "agent"
+    assert "firecrawl_scrape_website" in d.tool_names
+
+
 def test_thanks_is_simple():
     d = route_intent(_user("Ευχαριστώ πολύ!"))
     assert d.mode == "simple"

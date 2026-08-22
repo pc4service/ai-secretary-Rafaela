@@ -178,6 +178,16 @@ _GROUP_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ),
 ]
 
+# Any http(s) / www / bare domain → always attach Firecrawl tools.
+_URL_RE = re.compile(
+    r"(?i)("
+    r"https?://[^\s<>\]'\"\)]+"
+    r"|www\.[^\s<>\]'\"\)]+"
+    r"|(?<![@\w])(?:[a-z0-9](?:[a-z0-9\-]{0,61}[a-z0-9])?\.)+"
+    r"(?:gr|com|net|org|eu|io|app|dev|co|uk|info)(?:/[^\s]*)?"
+    r")"
+)
+
 # Pure time questions can stay on a tiny tool set without full agent pack.
 _TIME_ONLY = re.compile(
     r"(?i)^\s*("
@@ -270,6 +280,13 @@ def route_intent(
     force = bool(_FORCE_AGENT.search(text))
     simple_hit = bool(_SIMPLE_OK.search(text))
     words = re.findall(r"\w+", text, flags=re.UNICODE)
+    has_url = bool(_URL_RE.search(text))
+
+    # Pasted URLs / company sites → Firecrawl. Never claim "no browsing".
+    if has_url:
+        groups.add("web")
+        groups.add("core")
+        force = True
 
     # day_brief is a virtual group → expand to mail+cal+memory+core
     if "day_brief" in groups:
@@ -281,12 +298,25 @@ def route_intent(
     # Only pure chit-chat: after stripping greeting-like tokens, little remains.
     residual = _SIMPLE_OK.sub(" ", text)
     residual_words = re.findall(r"\w+", residual, flags=re.UNICODE)
-    pure_chitchat = simple_hit and not force and not groups and len(residual_words) <= 2
+    pure_chitchat = (
+        simple_hit
+        and not force
+        and not groups
+        and not has_url
+        and len(residual_words) <= 2
+    )
 
     if pure_chitchat:
         return RouteDecision(mode="simple", groups=frozenset(), reason="chitchat")
 
-    if not force and not groups and len(words) <= 6 and simple_hit and len(residual_words) <= 2:
+    if (
+        not force
+        and not groups
+        and not has_url
+        and len(words) <= 6
+        and simple_hit
+        and len(residual_words) <= 2
+    ):
         return RouteDecision(mode="simple", groups=frozenset(), reason="short_chitchat")
 
     if not groups:
