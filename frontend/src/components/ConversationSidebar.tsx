@@ -2,9 +2,19 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { listConversations, deleteConversation, isUnauthorized } from "@/lib/api";
 import { MessageSquarePlus, Trash2, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+  DialogClose,
+} from "@/components/ui/dialog";
 
 type Conv = {
   id: string;
@@ -26,6 +36,8 @@ export default function ConversationSidebar({
   const router = useRouter();
   const [items, setItems] = useState<Conv[]>([]);
   const [loading, setLoading] = useState(true);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   async function load() {
     try {
@@ -46,19 +58,27 @@ export default function ConversationSidebar({
     load();
   }, [refreshKey]);
 
-  async function onDelete(id: string, e: React.MouseEvent) {
+  function onDeleteClick(id: string, e: React.MouseEvent) {
     e.stopPropagation();
-    if (!confirm("Διαγραφή συνομιλίας;")) return;
+    setPendingDeleteId(id);
+  }
+
+  async function confirmDelete() {
+    if (!pendingDeleteId) return;
+    setDeleting(true);
     try {
-      await deleteConversation(id);
-      if (activeId === id) onSelect(null);
+      await deleteConversation(pendingDeleteId);
+      if (activeId === pendingDeleteId) onSelect(null);
       await load();
+      setPendingDeleteId(null);
     } catch (err: any) {
       if (isUnauthorized(err)) {
         router.replace("/login");
         return;
       }
-      alert(err.message);
+      toast.error(err.message);
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -103,7 +123,7 @@ export default function ConversationSidebar({
             </span>
             <button
               type="button"
-              onClick={(e) => onDelete(c.id, e)}
+              onClick={(e) => onDeleteClick(c.id, e)}
               className="opacity-0 group-hover:opacity-100 p-0.5 text-slate-400 hover:text-red-500"
               aria-label="Διαγραφή"
             >
@@ -112,6 +132,39 @@ export default function ConversationSidebar({
           </div>
         ))}
       </div>
+
+      <Dialog
+        open={!!pendingDeleteId}
+        onOpenChange={(open) => !open && setPendingDeleteId(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Διαγραφή συνομιλίας;</DialogTitle>
+            <DialogDescription>
+              Η ενέργεια αυτή δεν αναιρείται.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <DialogClose asChild>
+              <button
+                type="button"
+                className="rounded-lg px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+              >
+                Άκυρο
+              </button>
+            </DialogClose>
+            <button
+              type="button"
+              onClick={confirmDelete}
+              disabled={deleting}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-sm px-3 py-1.5 disabled:opacity-50"
+            >
+              {deleting && <Loader2 className="animate-spin" size={14} />}
+              Διαγραφή
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

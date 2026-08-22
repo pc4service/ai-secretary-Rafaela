@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { toast } from "sonner";
 import {
   Bot,
   Calendar,
@@ -72,7 +73,7 @@ export default function OnboardingWizard({ onComplete, onGoSettings }: Props) {
           : await getGoogleAuthUrl();
       if (data.auth_url) window.location.href = data.auth_url;
     } catch (e: any) {
-      alert(e.message || "Αποτυχία σύνδεσης — μπορείς να συνεχίσεις χωρίς.");
+      toast.error(e.message || "Αποτυχία σύνδεσης — μπορείς να συνεχίσεις χωρίς.");
     } finally {
       setConnecting(null);
     }

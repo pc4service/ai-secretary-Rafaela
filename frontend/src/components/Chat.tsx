@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { Send, Loader2, Bot, User, Check, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { toast } from "sonner";
 import {
   streamChat,
   resolveAction,
@@ -268,7 +269,7 @@ export default function Chat({
       });
       onPendingChange?.();
     } catch (err: any) {
-      alert(err.message);
+      toast.error(err.message);
     } finally {
       setResolving(null);
     }

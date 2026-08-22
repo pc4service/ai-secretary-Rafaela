@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { toast } from "sonner";
 import {
   getSettings,
   getMicrosoftAuthUrl,
@@ -124,7 +125,7 @@ export default function SettingsPanel() {
         router.replace("/login");
         return;
       }
-      alert(e.message);
+      toast.error(e.message);
     } finally {
       setActionLoading(null);
     }
@@ -140,7 +141,7 @@ export default function SettingsPanel() {
         router.replace("/login");
         return;
       }
-      alert(e.message);
+      toast.error(e.message);
     } finally {
       setActionLoading(null);
     }
@@ -156,7 +157,7 @@ export default function SettingsPanel() {
         router.replace("/login");
         return;
       }
-      alert(e.message);
+      toast.error(e.message);
     } finally {
       setActionLoading(null);
     }
@@ -172,7 +173,7 @@ export default function SettingsPanel() {
         router.replace("/login");
         return;
       }
-      alert(e.message);
+      toast.error(e.message);
     } finally {
       setActionLoading(null);
     }
@@ -188,7 +189,7 @@ export default function SettingsPanel() {
         router.replace("/login");
         return;
       }
-      alert(e.message);
+      toast.error(e.message);
     } finally {
       setActionLoading(null);
     }
@@ -204,7 +205,7 @@ export default function SettingsPanel() {
         router.replace("/login");
         return;
       }
-      alert(e.message);
+      toast.error(e.message);
     } finally {
       setActionLoading(null);
     }

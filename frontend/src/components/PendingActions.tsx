@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import {
   getPendingActions,
   getActionHistory,
@@ -131,7 +132,7 @@ export default function PendingActionsPanel({ onChange }: Props) {
         router.replace("/login");
         return;
       }
-      alert(e.message);
+      toast.error(e.message);
     } finally {
       setResolving(null);
     }

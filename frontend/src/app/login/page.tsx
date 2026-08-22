@@ -10,6 +10,7 @@ import {
   getMe,
 } from "@/lib/auth";
 import { Bot, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 
 function LoginForm() {
   const router = useRouter();
@@ -46,7 +47,7 @@ function LoginForm() {
     try {
       window.location.href = await startGoogleLogin();
     } catch (e: any) {
-      alert(e.message);
+      toast.error(e.message);
       setLoading(null);
     }
   }
@@ -56,7 +57,7 @@ function LoginForm() {
     try {
       window.location.href = await startMicrosoftLogin();
     } catch (e: any) {
-      alert(e.message);
+      toast.error(e.message);
       setLoading(null);
     }
   }
@@ -67,7 +68,7 @@ function LoginForm() {
       await loginDemo();
       router.replace("/");
     } catch (e: any) {
-      alert(e.message);
+      toast.error(e.message);
       setLoading(null);
     }
   }
